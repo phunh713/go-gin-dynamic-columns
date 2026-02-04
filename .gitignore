@@ -1,0 +1,40 @@
+# Binaries and build outputs
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+__debug_bin*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE and editor files
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go specific
+vendor/
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Test coverage
+*.out
+coverage.html
