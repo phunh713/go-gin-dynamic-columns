@@ -7,6 +7,7 @@ import (
 	"gin-demo/internal/shared/base"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/shared/utils"
+	"strings"
 )
 
 type DynamicColumnRepository interface {
@@ -15,10 +16,10 @@ type DynamicColumnRepository interface {
 	Create(ctx context.Context, column *DynamicColumn) (*DynamicColumn, error)
 	GetRefreshRecordById(ctx context.Context, table string, id int64) (interface{}, error)
 	GetRecordByDependency(ctx context.Context, dependency string) []DynamicColumn
-	RefreshDynamicColumns(ctx context.Context, table string, id int64, action constants.Action, changes map[string]Dependency, ctxObj map[string]interface{}) (map[string]Dependency, error)
+	RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error
 	FindDependantTableAndIds(ctx context.Context, table string, ctxObj map[string]interface{}, changes map[string]Dependency) *map[string][]int64
 	GetAllDependantsByChanges(ctx context.Context, table string, changes map[string]Dependency) []DynamicColumn
-	GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj CtxObjIds) []int64
+	GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64
 }
 
 type dynamicColumnRepository struct {
@@ -71,7 +72,7 @@ func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context,
 	// Remove the last comma
 	depTables = depTables[:len(depTables)-1]
 
-	query := fmt.Sprintf("SELECT * FROM dynamic_columns WHERE dependencies ?| ARRAY[%s] AND table_name != '%s'", depTables, table)
+	query := fmt.Sprintf("SELECT * FROM dynamic_columns WHERE dependencies ?| ARRAY[%s]", depTables)
 	err := tx.Raw(query).Scan(&columns).Error
 	if err != nil {
 		return nil
@@ -144,7 +145,7 @@ func (r *dynamicColumnRepository) GetRecordByDependency(ctx context.Context, dep
 	return results
 }
 
-func (r *dynamicColumnRepository) RefreshDynamicColumns(ctx context.Context, table string, id int64, action constants.Action, changes map[string]Dependency, ctxObj map[string]interface{}) (map[string]Dependency, error) {
+func (r *dynamicColumnRepository) RefreshDynamicColumns_(ctx context.Context, table string, ids []int64, action constants.Action, changes map[string]Dependency, ctxObj map[string]interface{}) (map[string]Dependency, error) {
 	tx := r.GetDbTx(ctx)
 	setStm := ""
 	dynamicColumns := r.GetAllByTableName(ctx, table, changes, action)
@@ -163,7 +164,13 @@ func (r *dynamicColumnRepository) RefreshDynamicColumns(ctx context.Context, tab
 
 	// remove the last comma
 	setStm = setStm[:len(setStm)-1]
-	query := fmt.Sprintf("UPDATE %s SET %s WHERE id = %d RETURNING *", table, setStm, id)
+
+	idsStr := make([]string, len(ids))
+	for i, id := range ids {
+		idsStr[i] = fmt.Sprintf("%d", id)
+	}
+
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s) RETURNING *", table, setStm, strings.Join(idsStr, ","))
 	err := tx.Exec(query).Error
 
 	if err != nil {
@@ -175,6 +182,29 @@ func (r *dynamicColumnRepository) RefreshDynamicColumns(ctx context.Context, tab
 	changes[table] = dep
 
 	return changes, nil
+}
+
+func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error {
+	query := strings.Join(strings.Fields(col.Formula), " ")
+	tx := r.GetDbTx(ctx)
+	setStm := fmt.Sprintf("%s = %s", col.Name, query)
+
+	idsStr := make([]string, len(col.Ids))
+	for i, id := range col.Ids {
+		idsStr[i] = fmt.Sprintf("%d", id)
+	}
+
+	if len(idsStr) == 0 {
+		idsStr = append(idsStr, "NULL")
+	}
+
+	updateQuery := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s)", col.TableName, setStm, strings.Join(idsStr, ","))
+	err := tx.Exec(updateQuery).Error
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *dynamicColumnRepository) FindDependantTableAndIds(ctx context.Context, table string, ctxObj map[string]interface{}, changes map[string]Dependency) *map[string][]int64 {
@@ -231,6 +261,14 @@ func (r *dynamicColumnRepository) getSelectorQueries(columns []DynamicColumn, ch
 	return res
 }
 
-func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj CtxObjIds) []int64 {
-	return []int64{}
+func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64 {
+
+	var ids []int64
+	tx := r.GetDbTx(ctx)
+	query := utils.BuildFormulaSQL(querySelector, ctxObj)
+	err := tx.Raw(query).Scan(&ids).Error
+	if err != nil {
+		return nil
+	}
+	return ids
 }

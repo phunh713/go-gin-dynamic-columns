@@ -15,9 +15,10 @@ type DynamicColumn struct {
 	Dependencies map[string]Dependency `json:"dependencies" gorm:"column:dependencies;type:jsonb;serializer:json"`
 }
 
-type DynamicColumnWithIds struct {
+type DynamicColumnWithMetadata struct {
 	DynamicColumn
-	Ids []int64 `json:"ids"`
+	Ids    []int64 `json:"ids"`
+	ctxObj map[string]interface{}
 }
 
 type CtxObjIds = map[string]struct {

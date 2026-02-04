@@ -47,7 +47,24 @@ func BuildFormulaSQL(formula string, contextObj map[string]interface{}) string {
 		}
 
 		// Get field value by field name
-		value := FindFieldByJsonTag(contextObj[ctxKey], fieldName)
+		contextKey := contextObj[ctxKey]
+
+		// Handle different context value types
+		var value any
+
+		// Try to access as map using reflection
+		v := reflect.ValueOf(contextKey)
+		if v.Kind() == reflect.Map {
+			// Access map key
+			mapValue := v.MapIndex(reflect.ValueOf(fieldName))
+			if mapValue.IsValid() {
+				value = mapValue.Interface()
+			}
+		} else {
+			// Try to find field by JSON tag in struct
+			value = FindFieldByJsonTag(contextKey, fieldName)
+		}
+
 		value = convertValueToSQL(value)
 
 		result = strings.Replace(result, placeholder, fmt.Sprintf("%v", value), 1)
@@ -79,6 +96,16 @@ func convertValueToSQL(value interface{}) interface{} {
 		return fmt.Sprintf("'%v'", parseToSQLDate(*timePtr))
 	}
 
+	// if value is a slice of int, convert to comma-separated string
+	if valueType.Kind() == reflect.Slice && valueType.Elem().Kind() == reflect.Int {
+		s := reflect.ValueOf(value)
+		var strValues []string
+		for i := 0; i < s.Len(); i++ {
+			strValues = append(strValues, fmt.Sprintf("%v", s.Index(i).Interface()))
+		}
+		return fmt.Sprintf("(%s)", strings.Join(strValues, ","))
+	}
+
 	return value
 }
 
@@ -107,6 +134,11 @@ func FindFieldByJsonTag(obj interface{}, jsonTag string) interface{} {
 	v := reflect.ValueOf(obj)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
+	}
+
+	// Only works on structs
+	if v.Kind() != reflect.Struct {
+		return nil
 	}
 
 	t := v.Type()

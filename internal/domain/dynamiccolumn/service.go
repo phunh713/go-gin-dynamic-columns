@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/shared/utils"
+	"strings"
 )
 
 type DynamicColumnService interface {
@@ -35,6 +36,7 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordId(
 	if err != nil {
 		return err
 	}
+	fmt.Println("Refresh Record: ", refreshRecord)
 
 	// Get all dynamic columns affected by the changes
 	dynamicCols := r.getAllDynamicColumnsFromChanges(ctx, table, changes)
@@ -44,32 +46,41 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordId(
 
 	// Determine the order of refreshing dynamic columns based on their dependencies
 	orderedDynamicCols := r.determineRefreshOrder(ctx, table, id, dynamicCols)
-	fmt.Printf("Ordered Dynamic Columns to refresh: %v\n", orderedDynamicCols)
 
-	// build ctxObj for building formula SQL later
-	ctxObj := map[string]interface{}{
-		table:                             refreshRecord,
-		fmt.Sprintf("%s:original", table): originalRecord,
+	for _, col := range orderedDynamicCols {
+		fmt.Printf("Dynamic Column to refresh: %s.%s for IDs: %v\n", col.TableName, col.Name, col.Ids)
 	}
-	changes, err = r.dynamicColumnRepo.RefreshDynamicColumns(ctx, table, id, action, changes, ctxObj)
-	if err != nil {
-		fmt.Println("Error refreshing internal dynamic columns:", err)
-		return err
-	}
-
-	tableIdMap := r.dynamicColumnRepo.FindDependantTableAndIds(ctx, table, ctxObj, changes)
-	if tableIdMap == nil {
-		return nil
-	}
-
-	// print the detail value of tableIdMap
-	fmt.Printf("Dependent Table and IDs to refresh:%v\n", *tableIdMap)
-	for table, ids := range *tableIdMap {
-		for _, id := range ids {
-			// TODO: should I get the original record here?
-			r.RefreshDynamicColumnsOfRecordId(ctx, table, id, constants.ActionRefresh, changes, nil)
+	for _, col := range orderedDynamicCols {
+		err := r.dynamicColumnRepo.RefreshDynamicColumn(ctx, col)
+		if err != nil {
+			return err
 		}
 	}
+
+	// build ctxObj for building formula SQL later
+	// ctxObj := map[string]interface{}{
+	// 	table:                             refreshRecord,
+	// 	fmt.Sprintf("%s:original", table): originalRecord,
+	// }
+	// changes, err = r.dynamicColumnRepo.RefreshDynamicColumns(ctx, table, id, action, changes, ctxObj)
+	// if err != nil {
+	// 	fmt.Println("Error refreshing internal dynamic columns:", err)
+	// 	return err
+	// }
+
+	// tableIdMap := r.dynamicColumnRepo.FindDependantTableAndIds(ctx, table, ctxObj, changes)
+	// if tableIdMap == nil {
+	// 	return nil
+	// }
+
+	// // print the detail value of tableIdMap
+	// fmt.Printf("Dependent Table and IDs to refresh:%v\n", *tableIdMap)
+	// for table, ids := range *tableIdMap {
+	// 	for _, id := range ids {
+	// 		// TODO: should I get the original record here?
+	// 		r.RefreshDynamicColumnsOfRecordId(ctx, table, id, constants.ActionRefresh, changes, nil)
+	// 	}
+	// }
 	return err
 }
 
@@ -138,8 +149,8 @@ func (r *dynamicColumnService) getAllDynamicColumnsFromChanges(ctx context.Conte
 /*
 * table is the original table where the changes happened
  */
-func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table string, id int64, dynamicCols []DynamicColumn) []DynamicColumnWithIds {
-	result := make([]DynamicColumnWithIds, 0)
+func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table string, id int64, dynamicCols []DynamicColumn) []DynamicColumnWithMetadata {
+	result := make([]DynamicColumnWithMetadata, 0)
 	// resultNames is slice of flatten names already in result: ["invoices.status", ...]
 	resultNames := make([]string, 0)
 
@@ -149,7 +160,12 @@ func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table 
 		refreshColNames = append(refreshColNames, col.TableName+"."+col.Name)
 	}
 
-	for _, col := range dynamicCols {
+	// Use index-based loop so appending to dynamicCols extends the loop
+	for i := 0; i < len(dynamicCols); i++ {
+		col := dynamicCols[i]
+		if len(utils.StringSlicesIntersect([]string{col.TableName + "." + col.Name}, resultNames)) > 0 {
+			continue
+		}
 		// deps is slice of flatten names: ["invoices.total_amount", "payments.amount", ...]
 		deps := make([]string, 0)
 		for depTable, dep := range col.Dependencies {
@@ -168,25 +184,24 @@ func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table 
 			if query == "" {
 				ids = append(ids, id)
 			} else {
-				ctxObj := CtxObjIds{
-					table: {
-						Ids: []int64{id},
+				ctxObj := map[string]interface{}{
+					table: map[string]string{
+						"ids": fmt.Sprintf("%d", id),
 					},
 				}
 
 				foundIds := r.dynamicColumnRepo.GetAllSelectorIds(ctx, query, ctxObj)
-				ids = append(ids, foundIds...)
+				if len(foundIds) > 0 {
+					ids = append(ids, foundIds...)
+				}
 			}
 
-			result = append(result, DynamicColumnWithIds{
+			result = append(result, DynamicColumnWithMetadata{
 				DynamicColumn: col,
 				Ids:           ids,
 			})
+			resultNames = append(resultNames, col.TableName+"."+col.Name)
 			continue
-		}
-
-		for _, resCol := range result {
-			resultNames = append(resultNames, resCol.TableName+"."+resCol.Name)
 		}
 
 		// if the dependecies of "col" are in result already, append it to result
@@ -199,25 +214,37 @@ func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table 
 						continue
 					}
 
-					ctxObj := CtxObjIds{
-						depCol.TableName: {
-							Ids: depCol.Ids,
+					// concat to sql IN clause with comma-separated values
+					idsStr := make([]string, len(depCol.Ids))
+					for i, v := range depCol.Ids {
+						idsStr[i] = fmt.Sprintf("%d", v)
+					}
+
+					ctxObj := map[string]interface{}{
+						depCol.TableName: map[string]string{
+							"ids": strings.Join(idsStr, ","),
 						},
 					}
-					foundIds := r.dynamicColumnRepo.GetAllSelectorIds(ctx, col.Dependencies[depCol.TableName].RecordIdsSelector, ctxObj)
-					ids = append(ids, foundIds...)
+					query := col.Dependencies[depCol.TableName].RecordIdsSelector
+					if query == "" {
+						ids = utils.AppendUnique(ids, depCol.Ids...)
+					} else {
+						foundIds := r.dynamicColumnRepo.GetAllSelectorIds(ctx, query, ctxObj)
+						if len(foundIds) > 0 {
+							ids = utils.AppendUnique(ids, foundIds...)
+						}
+					}
+					result = append(result, DynamicColumnWithMetadata{
+						DynamicColumn: col,
+						Ids:           ids,
+					})
+					resultNames = append(resultNames, col.TableName+"."+col.Name)
 				}
-				result = append(result, DynamicColumnWithIds{
-					DynamicColumn: col,
-					Ids:           ids,
-				})
-				continue
 			}
-
-			// else, put it back to the end of dynamicCols to check again later
-			dynamicCols = append(dynamicCols, col)
-
+			continue
 		}
+		// else, put it back to the end of dynamicCols to check again later
+		dynamicCols = append(dynamicCols, col)
 	}
 	return result
 }

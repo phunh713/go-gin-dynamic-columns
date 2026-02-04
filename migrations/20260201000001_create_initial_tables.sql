@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     status VARCHAR(50) NOT NULL,
     payment_terms INTEGER NOT NULL DEFAULT 30,
     company_id BIGINT NOT NULL,
+    force_payment BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT chk_payment_terms_positive CHECK (payment_terms > 0),
     CONSTRAINT chk_total_amount_positive CHECK (total_amount >= 0)
 );

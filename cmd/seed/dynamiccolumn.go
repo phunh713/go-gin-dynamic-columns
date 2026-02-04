@@ -8,19 +8,17 @@ import (
 )
 
 func seedInvoices(db *gorm.DB) {
-	tableName := "invoices"
 	// Implement invoice seeding logic here if needed
 	dycol := []dynamiccolumn.DynamicColumn{
 		{
-			TableName: tableName,
+			TableName: "invoices",
 			Name:      "pending_amount",
 			Type:      "float",
 			Formula: `
 			(
-				SELECT COALESCE({invoices.total_amount} - SUM(amount), {invoices.total_amount})
+				SELECT COALESCE(total_amount - SUM(amount), total_amount)
 				FROM payments 
-				WHERE 
-					payments.invoice_id = {invoices.id}
+				WHERE payments.invoice_id = id
 			)
 			`,
 			Dependencies: map[string]dynamiccolumn.Dependency{
@@ -34,19 +32,41 @@ func seedInvoices(db *gorm.DB) {
 			},
 		},
 		{
-			TableName: tableName,
+			TableName: "invoices",
 			Name:      "status",
 			Type:      "string",
 			Formula: `
 				CASE 
-					WHEN {invoices.pending_amount} <= 0 THEN 'Paid'
-					WHEN CURRENT_DATE - DATE {invoices.created_at} > {invoices.payment_terms} THEN 'Overdue' 
+					WHEN pending_amount <= 0 THEN 'Paid'
+					WHEN CURRENT_DATE - created_at > payment_terms * INTERVAL '1 day' THEN 'Overdue'
 					ELSE 'Pending' 
 				END
 			`,
 			Dependencies: map[string]dynamiccolumn.Dependency{
 				"invoices": {
 					Columns: []string{"pending_amount", "created_at", "payment_terms"},
+				},
+			},
+		},
+		{
+			TableName: "invoices",
+			Name:      "force_payment",
+			Type:      "bool",
+			Formula: `
+				CASE 
+					WHEN (
+						SELECT status FROM companies WHERE company_id = id
+					) = 'At Risk' THEN true
+					ELSE false
+				END
+			`,
+			Dependencies: map[string]dynamiccolumn.Dependency{
+				"invoices": {
+					Columns: []string{"id"},
+				},
+				"companies": {
+					Columns:           []string{"status"},
+					RecordIdsSelector: "SELECT id FROM invoices WHERE company_id in ({companies.ids})",
 				},
 			},
 		},
@@ -69,8 +89,8 @@ func seedCompanies(db *gorm.DB) {
 			Type:      "string",
 			Formula: `
 				CASE
-					WHEN {companies.is_working} = false THEN 'Inactive'
-					WHEN (SELECT COUNT(*) FROM invoices WHERE invoices.company_id = {companies.id} AND invoices.status = 'Overdue') > 5 THEN 'At Risk'
+					WHEN companies.is_working = false THEN 'Inactive'
+					WHEN (SELECT COUNT(*) FROM invoices WHERE invoices.company_id = companies.id AND invoices.status = 'Overdue') > 5 THEN 'At Risk'
 					ELSE 'Active'
 				END
 			`,
@@ -80,37 +100,7 @@ func seedCompanies(db *gorm.DB) {
 				},
 				"invoices": {
 					Columns:           []string{"status", "company_id"},
-					RecordIdsSelector: "SELECT company_id FROM invoices inv WHERE inv.id IN {invoices.ids}",
-				},
-			},
-		},
-	}
-
-	for _, col := range dycol {
-		if err := db.Create(&col).Error; err != nil {
-			fmt.Println(err)
-			continue
-		}
-	}
-}
-
-func seedContracts(db *gorm.DB) {
-	// Implement contract seeding logic here if needed
-	dycol := []dynamiccolumn.DynamicColumn{
-		{
-			TableName: "contracts",
-			Name:      "status",
-			Type:      "string",
-			Formula: `
-				CASE
-					WHEN {companies.is_working} = false THEN 'Inactive'
-					ELSE 'Active'
-				END
-			`,
-			Dependencies: map[string]dynamiccolumn.Dependency{
-				"companies": {
-					Columns:           []string{"is_working"},
-					RecordIdsSelector: "SELECT id FROM contracts WHERE company_id IN {companies.ids}",
+					RecordIdsSelector: "SELECT company_id FROM invoices inv WHERE inv.id IN ({invoices.ids})",
 				},
 			},
 		},
@@ -125,7 +115,6 @@ func seedContracts(db *gorm.DB) {
 }
 
 func SeedDynamicColumns(db *gorm.DB) {
-	seedInvoices(db)
 	seedCompanies(db)
-	seedContracts(db)
+	seedInvoices(db)
 }
