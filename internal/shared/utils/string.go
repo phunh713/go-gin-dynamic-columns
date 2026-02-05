@@ -20,7 +20,7 @@ func BuildFormulaSQL(formula string, contextObj map[string]interface{}) string {
 	//   },
 	//   "companies": {
 	//	 	"status": string,
-	//	 	"is_working": bool,
+	//	 	"is_active": bool,
 	//   },
 	// }
 
@@ -76,11 +76,17 @@ func BuildFormulaSQL(formula string, contextObj map[string]interface{}) string {
 func convertValueToSQL(value interface{}) interface{} {
 	valueType := reflect.TypeOf(value)
 
-	if value == nil {
+	if value == nil || value == "" {
 		return "NULL"
 	}
 
 	if valueType.Kind() == reflect.String {
+		strValue := value.(string)
+		// Don't quote comma-separated numbers (for IN clauses)
+		// Check if string matches pattern: "1,2,3" or "1" (numbers with commas)
+		if regexp.MustCompile(`^\d+(,\d+)*$`).MatchString(strValue) {
+			return strValue
+		}
 		return fmt.Sprintf("'%v'", value)
 	}
 
@@ -103,7 +109,7 @@ func convertValueToSQL(value interface{}) interface{} {
 		for i := 0; i < s.Len(); i++ {
 			strValues = append(strValues, fmt.Sprintf("%v", s.Index(i).Interface()))
 		}
-		return fmt.Sprintf("(%s)", strings.Join(strValues, ","))
+		return strings.Join(strValues, ",")
 	}
 
 	return value

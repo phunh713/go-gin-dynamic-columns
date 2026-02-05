@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -87,8 +88,38 @@ func GetStructFieldJsonTags(model interface{}) []string {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		tag := field.Tag.Get("json")
-		if tag != "" {
-			jsonTags = append(jsonTags, tag)
+		if tag != "" && tag != "-" {
+			// Extract field name before comma (removes omitempty, string, etc.)
+			fieldName := strings.Split(tag, ",")[0]
+			jsonTags = append(jsonTags, fieldName)
+		}
+	}
+	return jsonTags
+}
+
+// GetNonZeroStructFieldJsonTags returns only JSON tags of fields with non-zero values
+// Useful for tracking which fields were actually set in an UPDATE request
+func GetNonZeroStructFieldJsonTags(model interface{}) []string {
+	v := reflect.ValueOf(model)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	var jsonTags []string
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		tag := field.Tag.Get("json")
+		if tag != "" && tag != "-" {
+			// Extract field name before comma (removes omitempty, string, etc.)
+			fieldName := strings.Split(tag, ",")[0]
+
+			// Only include fields that have non-zero values (were actually set in JSON)
+			if !fieldValue.IsZero() {
+				jsonTags = append(jsonTags, fieldName)
+			}
 		}
 	}
 	return jsonTags

@@ -13,6 +13,7 @@ type InvoiceService interface {
 	Create(ctx context.Context, invoice *Invoice) (*Invoice, error)
 	Update(ctx context.Context, id int64, updatePayload *InvoiceUpdateRequest) (*Invoice, error)
 	Delete(ctx context.Context, id int64) error
+	CreateMultiple(ctx context.Context, invoices []Invoice) ([]Invoice, error)
 }
 
 type invoiceService struct {
@@ -37,7 +38,7 @@ func (s *invoiceService) Create(ctx context.Context, invoice *Invoice) (*Invoice
 	if err != nil {
 		return nil, err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordId(ctx, "invoices", invoice.Id, constants.ActionCreate, nil, nil)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "invoices", []int64{invoice.Id}, constants.ActionCreate, nil, nil, invoice)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func (s *invoiceService) Update(ctx context.Context, id int64, updatePayload *In
 	if err != nil {
 		return nil, err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordId(ctx, "invoices", id, constants.ActionUpdate, nil, originalInvoice)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "invoices", []int64{id}, constants.ActionUpdate, nil, &originalInvoice.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +81,24 @@ func (s *invoiceService) Delete(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordId(ctx, "invoices", id, constants.ActionDelete, nil, originalInvoice)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "invoices", []int64{id}, constants.ActionDelete, nil, &originalInvoice.Id, nil)
 	return err
+}
+
+func (s *invoiceService) CreateMultiple(ctx context.Context, invoices []Invoice) ([]Invoice, error) {
+	createdInvoices, err := s.invoiceRepo.CreateMultiple(ctx, invoices)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for _, invoice := range createdInvoices {
+		ids = append(ids, invoice.Id)
+	}
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "invoices", ids, constants.ActionCreate, nil, nil, createdInvoices)
+	if err != nil {
+		return nil, err
+	}
+	refreshedInvoices := s.invoiceRepo.GetAll(ctx)
+
+	return refreshedInvoices, nil
 }

@@ -2,9 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -21,20 +18,20 @@ func NewDB(configEnv *ConfigEnv) *gorm.DB {
 		configEnv.DbDatabase,
 		configEnv.DbPort)
 	fmt.Println(dsn)
-	
+
 	// Configure logger to print all SQL queries
-	newLogger := logger.New(
-		log.New(os.Stdout, "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             time.Second,
-			LogLevel:                  logger.Info,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  true,
-		},
-	)
-	
+	// newLogger := logger.New(
+	// 	log.New(os.Stdout, "\r\n", log.LstdFlags),
+	// 	logger.Config{
+	// 		SlowThreshold:             time.Second,
+	// 		LogLevel:                  logger.Info,
+	// 		IgnoreRecordNotFoundError: true,
+	// 		Colorful:                  true,
+	// 	},
+	// )
+	// newLogger = nil
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: newLogger,
+		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		panic(err)

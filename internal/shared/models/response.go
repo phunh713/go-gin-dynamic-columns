@@ -1,8 +1,13 @@
 package models
 
+import "time"
+
 // Base GORM model
 type GormModel struct {
-	ID int64 `json:"id" gorm:"primaryKey;column:id"`
+	Id        int64     `json:"id" gorm:"primaryKey;column:id"`
+	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at;autoUpdateTime"`
+	IsDeleted bool      `json:"is_deleted" gorm:"column:is_deleted;default:false"`
 }
 
 // Base response structure

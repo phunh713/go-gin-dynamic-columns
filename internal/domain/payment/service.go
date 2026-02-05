@@ -10,6 +10,7 @@ type PaymentService interface {
 	GetAllPayments(ctx context.Context) []Payment
 	GetById(ctx context.Context, id int64) (*Payment, error)
 	Create(ctx context.Context, entity *Payment) (*Payment, error)
+	Update(ctx context.Context, id int64, updatePayload *PaymentUpdateRequest) (*Payment, error)
 }
 
 type paymentService struct {
@@ -36,11 +37,32 @@ func (s *paymentService) Create(ctx context.Context, entity *Payment) (*Payment,
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordId(ctx, "payment", created.Id, constants.ActionCreate, nil, nil)
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, "payments", []int64{created.Id}, constants.ActionCreate, nil, nil, entity)
 	if err != nil {
 		return nil, err
 	}
 
 	// Fetch updated record
 	return s.paymentRepo.GetById(ctx, created.Id)
+}
+
+func (s *paymentService) Update(ctx context.Context, id int64, updatePayload *PaymentUpdateRequest) (*Payment, error) {
+	original, err := s.paymentRepo.GetById(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.paymentRepo.Update(ctx, id, updatePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Refresh dynamic columns
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, "payments", []int64{id}, constants.ActionUpdate, nil, &original.Id, updatePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch updated record
+	return s.paymentRepo.GetById(ctx, id)
 }

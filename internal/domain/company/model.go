@@ -1,16 +1,15 @@
 package company
 
-import "time"
+import "gin-demo/internal/shared/models"
 
 type Company struct {
-	Id        int64     `json:"id" gorm:"primaryKey;column:id"`
-	Name      string    `json:"name" gorm:"column:name"`
-	IsWorking bool      `json:"is_working" gorm:"column:is_working"`
-	Status    string    `json:"status" gorm:"column:status"`
-	CreatedAt time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	models.GormModel
+	Name     string `json:"name" gorm:"column:name" binding:"required"`
+	IsActive bool   `json:"is_active" gorm:"column:is_active;default:true"`
+	Status   string `json:"status" gorm:"column:status"` // Approval Pending, Active, Inactive, At Risk, Suspended (dynamic)
 }
 
 type CompanyUpdateRequest struct {
-	Name      *string `json:"name,omitempty" gorm:"column:name"`
-	IsWorking *bool   `json:"is_working,omitempty" gorm:"column:is_working"`
+	Name     *string `json:"name,omitempty"`
+	IsActive *bool   `json:"is_active,omitempty"`
 }

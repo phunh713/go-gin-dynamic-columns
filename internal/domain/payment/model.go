@@ -1,12 +1,21 @@
 package payment
 
-import "time"
+import (
+	"gin-demo/internal/shared/models"
+	"time"
+)
 
 type Payment struct {
-	Id          int64     `json:"id" gorm:"primaryKey;column:id"`
+	models.GormModel
 	Description string    `json:"description" gorm:"column:description"`
-	CreatedAt   time.Time `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	Amount      float64   `json:"amount" gorm:"column:amount" binding:"required"`
 	PaidAt      time.Time `json:"paid_at" gorm:"column:paid_at"`
-	Amount      float64   `json:"amount" gorm:"column:amount"`
-	InvoiceId   int64     `json:"invoice_id" gorm:"column:invoice_id"`
+	InvoiceId   int64     `json:"invoice_id" gorm:"column:invoice_id" binding:"required"`
+}
+
+type PaymentUpdateRequest struct {
+	Description *string    `json:"description,omitempty"`
+	PaidAt      *time.Time `json:"paid_at,omitempty"`
+	Amount      *float64   `json:"amount,omitempty"`
+	InvoiceId   *int64     `json:"invoice_id,omitempty"`
 }

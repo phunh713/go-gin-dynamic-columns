@@ -1,8 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"gin-demo/cmd/seed/dynamiccolumn"
 	"gin-demo/internal/application/config"
+	"strings"
+
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -12,11 +17,47 @@ func main() {
 	// Connect to database
 	db := config.NewDB(configEnv)
 
+	// Parse command-line flags
+	domainsFlag := flag.String("domains", "", "Comma-separated list of domains to seed (e.g., companies,invoices)")
+	flag.Parse()
+
 	fmt.Println("Starting seed...")
 
-	// Seed dynamic columns
-	SeedDynamicColumns(db)
+	// Determine which seeds to run
+	var domainsToSeed []string
+	if *domainsFlag != "" {
+		domainsToSeed = strings.Split(*domainsFlag, ",")
+		for i := range domainsToSeed {
+			domainsToSeed[i] = strings.TrimSpace(domainsToSeed[i])
+		}
+	}
 
-	fmt.Println("Companies seeded successfully")
+	// Define all available seed functions
+	seedFuncs := map[string]func(*gorm.DB){
+		"dynamiccolumns": dynamiccolumn.Seed,
+		"companies":      SeedCompanies,
+		"invoices":       SeedInvoices,
+		"approvals":      SeedApprovals,
+	}
+
+	// If no domains specified, run all seeds
+	if len(domainsToSeed) == 0 {
+		dynamiccolumn.Seed(db)
+		fmt.Println("Dynamic columns seeded successfully")
+
+		SeedCompanies(db)
+		fmt.Println("Companies seeded successfully")
+	} else {
+		// Run only specified domains
+		for _, domain := range domainsToSeed {
+			if seedFunc, exists := seedFuncs[domain]; exists {
+				seedFunc(db)
+				fmt.Printf("%s seeded successfully\n", domain)
+			} else {
+				fmt.Printf("Warning: Unknown domain '%s', skipping...\n", domain)
+			}
+		}
+	}
+
 	fmt.Println("Seeding completed!")
 }

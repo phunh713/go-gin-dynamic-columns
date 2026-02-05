@@ -38,7 +38,7 @@ func (s *companyService) Create(ctx context.Context, company *Company) (*Company
 	}
 
 	// Refresh dynamic columns in database
-	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordId(ctx, "companies", createdCompany.Id, constants.ActionCreate, nil, nil)
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, "companies", []int64{createdCompany.Id}, constants.ActionCreate, nil, nil, company)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (s *companyService) Update(ctx context.Context, id int64, companyUpdate *Co
 	}
 
 	// Refresh dynamic columns in database
-	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordId(ctx, "companies", id, constants.ActionUpdate, nil, originalCompany)
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, "companies", []int64{id}, constants.ActionUpdate, nil, &originalCompany.Id, companyUpdate)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ type PaymentRepository interface {
 	GetById(ctx context.Context, id int64) (*Payment, error)
 	GetAll(ctx context.Context) []Payment
 	Create(ctx context.Context, entity *Payment) (*Payment, error)
+	Update(ctx context.Context, id int64, updatePayload *PaymentUpdateRequest) error
 }
 
 type paymentRepository struct {
@@ -38,9 +39,19 @@ func (r *paymentRepository) GetAll(ctx context.Context) []Payment {
 
 func (r *paymentRepository) Create(ctx context.Context, entity *Payment) (*Payment, error) {
 	tx := r.GetDbTx(ctx)
-	err := tx.Create(entity).Error
+	err := tx.Raw("INSERT INTO payments (invoice_id, amount, paid_at, description) VALUES (?, ?, ?, ?) RETURNING id",
+		entity.InvoiceId, entity.Amount, entity.PaidAt, entity.Description).Scan(entity).Error
 	if err != nil {
 		return nil, err
 	}
 	return entity, nil
+}
+
+func (r *paymentRepository) Update(ctx context.Context, id int64, updatePayload *PaymentUpdateRequest) error {
+	if id <= 0 {
+		return nil
+	}
+
+	tx := r.GetDbTx(ctx)
+	return tx.Model(&Payment{}).Where("id = ?", id).Updates(updatePayload).Error
 }

@@ -5,14 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"gin-demo/internal/shared/base"
-	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/shared/utils"
 	"strings"
 )
 
 type DynamicColumnRepository interface {
 	GetAll(ctx context.Context) []DynamicColumn
-	GetAllByTableName(ctx context.Context, tableName string, changes map[string]Dependency, action constants.Action) []DynamicColumn
 	Create(ctx context.Context, column *DynamicColumn) (*DynamicColumn, error)
 	GetRefreshRecordById(ctx context.Context, table string, id int64) (interface{}, error)
 	GetRecordByDependency(ctx context.Context, dependency string) []DynamicColumn
@@ -38,30 +36,12 @@ func (r *dynamicColumnRepository) GetAll(ctx context.Context) []DynamicColumn {
 	return []DynamicColumn{}
 }
 
-func (r *dynamicColumnRepository) GetAllByTableName(ctx context.Context, tableName string, changes map[string]Dependency, action constants.Action) []DynamicColumn {
-	// Dummy data for illustration
-	tx := r.GetDbTx(ctx)
-	var columns []DynamicColumn
-	tx.Where("table_name = ?", tableName).Find(&columns)
-	fmt.Print("CHANGES: ", changes)
-
-	if len(changes) == 0 {
-		return columns
-	}
-
-	if action == constants.ActionRefresh || action == constants.ActionDelete || action == constants.ActionCreate {
-		return columns
-	}
-
-	return r.compareDepColumns(columns, changes)
-}
-
 func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context, table string, changes map[string]Dependency) []DynamicColumn {
 	if len(changes) == 0 {
 		return nil
 	}
 
-	tx := r.GetDbTx(ctx)
+	tx := r.GetDbTx(ctx).Debug()
 	var columns []DynamicColumn
 
 	depTables := ""
@@ -145,48 +125,9 @@ func (r *dynamicColumnRepository) GetRecordByDependency(ctx context.Context, dep
 	return results
 }
 
-func (r *dynamicColumnRepository) RefreshDynamicColumns_(ctx context.Context, table string, ids []int64, action constants.Action, changes map[string]Dependency, ctxObj map[string]interface{}) (map[string]Dependency, error) {
-	tx := r.GetDbTx(ctx)
-	setStm := ""
-	dynamicColumns := r.GetAllByTableName(ctx, table, changes, action)
-	colNames := []string{}
-	fmt.Println(dynamicColumns)
-	for _, col := range dynamicColumns {
-		fmt.Println(col.Name, col.Formula)
-		setStm += col.Name + " = " + utils.BuildFormulaSQL(col.Formula, ctxObj) + ","
-		colNames = append(colNames, col.Name)
-	}
-	fmt.Println("SET STATEMENT: ", setStm)
-	// Check if there are any columns to update
-	if len(setStm) == 0 {
-		return changes, nil
-	}
-
-	// remove the last comma
-	setStm = setStm[:len(setStm)-1]
-
-	idsStr := make([]string, len(ids))
-	for i, id := range ids {
-		idsStr[i] = fmt.Sprintf("%d", id)
-	}
-
-	query := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s) RETURNING *", table, setStm, strings.Join(idsStr, ","))
-	err := tx.Exec(query).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	dep := changes[table]
-	dep.Columns = append(dep.Columns, colNames...)
-	changes[table] = dep
-
-	return changes, nil
-}
-
 func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error {
 	query := strings.Join(strings.Fields(col.Formula), " ")
-	tx := r.GetDbTx(ctx)
+	tx := r.GetDbTx(ctx).Debug()
 	setStm := fmt.Sprintf("%s = %s", col.Name, query)
 
 	idsStr := make([]string, len(col.Ids))
@@ -198,7 +139,8 @@ func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col 
 		idsStr = append(idsStr, "NULL")
 	}
 
-	updateQuery := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s)", col.TableName, setStm, strings.Join(idsStr, ","))
+	distinctFromFilter := fmt.Sprintf("%s IS DISTINCT FROM %s", col.Name, query)
+	updateQuery := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s) AND %s", col.TableName, setStm, strings.Join(idsStr, ","), distinctFromFilter)
 	err := tx.Exec(updateQuery).Error
 
 	if err != nil {
@@ -262,13 +204,19 @@ func (r *dynamicColumnRepository) getSelectorQueries(columns []DynamicColumn, ch
 }
 
 func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64 {
-
-	var ids []int64
+	var ids []sql.NullInt64
 	tx := r.GetDbTx(ctx)
 	query := utils.BuildFormulaSQL(querySelector, ctxObj)
 	err := tx.Raw(query).Scan(&ids).Error
 	if err != nil {
 		return nil
 	}
-	return ids
+	// Convert []sql.NullInt64 to []int64
+	result := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			result = append(result, id.Int64)
+		}
+	}
+	return result
 }
