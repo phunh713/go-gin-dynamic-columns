@@ -16,13 +16,13 @@ type EmployeeService interface {
 }
 
 type employeeService struct {
-	employeeRepo      EmployeeRepository
+	employeeRepo         EmployeeRepository
 	dynamicColumnService dynamiccolumn.DynamicColumnService
 }
 
 func NewEmployeeService(employeeRepo EmployeeRepository, dynamicColumnService dynamiccolumn.DynamicColumnService) EmployeeService {
 	return &employeeService{
-		employeeRepo:      employeeRepo,
+		employeeRepo:         employeeRepo,
 		dynamicColumnService: dynamicColumnService,
 	}
 }
@@ -40,19 +40,19 @@ func (s *employeeService) Create(ctx context.Context, entity *Employee) (*Employ
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "employees", []int64{entity.Id}, constants.ActionCreate, nil, nil, entity)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{entity.Id}, constants.ActionCreate, nil, nil, entity)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Fetch updated record with dynamic columns
 	refreshedEntity, err := s.employeeRepo.GetById(ctx, entity.Id)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return refreshedEntity, nil
 }
 
@@ -61,24 +61,24 @@ func (s *employeeService) Update(ctx context.Context, id int64, updatePayload *E
 	if err != nil {
 		return nil, err
 	}
-	
+
 	err = s.employeeRepo.Update(ctx, id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "employees", []int64{id}, constants.ActionUpdate, nil, &originalEntity.Id, updatePayload)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionUpdate, nil, &originalEntity.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Fetch updated record
 	refreshedEntity, err := s.employeeRepo.GetById(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return refreshedEntity, nil
 }
 
@@ -90,13 +90,13 @@ func (s *employeeService) Delete(ctx context.Context, id int64) error {
 	if originalEntity == nil {
 		return errors.New("employee not found")
 	}
-	
+
 	err = s.employeeRepo.Delete(ctx, id)
 	if err != nil {
 		return err
 	}
-	
+
 	// Refresh dynamic columns after deletion
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, "employees", []int64{id}, constants.ActionDelete, nil, &originalEntity.Id, nil)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionDelete, nil, &originalEntity.Id, nil)
 	return err
 }

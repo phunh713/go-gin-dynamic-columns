@@ -9,6 +9,9 @@ import (
 	"gin-demo/internal/domain/employee"
 	"gin-demo/internal/domain/invoice"
 	"gin-demo/internal/domain/payment"
+	"gin-demo/internal/shared/constants"
+	"gin-demo/internal/shared/types"
+	"gin-demo/internal/shared/utils"
 )
 
 type Container struct {
@@ -52,16 +55,16 @@ type Container struct {
 	PaymentHandler    payment.PaymentHandler
 }
 
-func NewModelsMap() map[string]interface{} {
-	return map[string]interface{}{
+func NewModelsMap() types.ModelsMap {
+	return types.ModelsMap{
 		//insert table models here
-		"invoices":    invoice.Invoice{},
-		"contracts":   contract.Contract{},
-		"companies":   company.Company{},
-		"payments":    payment.Payment{},
-		"employees":   employee.Employee{},
-		"approvals":   approval.Approval{},
-		"deployments": deployment.Deployment{},
+		constants.TableNameInvoice:    invoice.Invoice{},
+		constants.TableNameContract:   contract.Contract{},
+		constants.TableNameCompany:    company.Company{},
+		constants.TableNamePayment:    payment.Payment{},
+		constants.TableNameEmployee:   employee.Employee{},
+		constants.TableNameApproval:   approval.Approval{},
+		constants.TableNameDeployment: deployment.Deployment{},
 	}
 }
 
@@ -70,8 +73,10 @@ func NewContainer() *Container {
 
 	// Shared Dependencies can be initialized here
 	modelsMap := NewModelsMap()
-	c.DynamicColumnRepository = dynamiccolumn.NewDynamicColumnRepository(modelsMap)
-	c.DynamicColumnService = dynamiccolumn.NewDynamicColumnService(c.DynamicColumnRepository, modelsMap)
+	modelRelationsMap := utils.BuildRelationMap(modelsMap)
+
+	c.DynamicColumnRepository = dynamiccolumn.NewDynamicColumnRepository(modelsMap, modelRelationsMap)
+	c.DynamicColumnService = dynamiccolumn.NewDynamicColumnService(c.DynamicColumnRepository, modelsMap, modelRelationsMap)
 
 	// Invoice
 	c.InvoiceRepository = invoice.NewInvoiceRepository()

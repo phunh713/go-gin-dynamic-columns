@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gin-demo/internal/domain/dynamiccolumn"
 	domainDynamicColumn "gin-demo/internal/domain/dynamiccolumn"
+	"gin-demo/internal/shared/constants"
 
 	"gorm.io/gorm"
 )
@@ -12,62 +13,48 @@ func seedInvoices(db *gorm.DB) {
 	// Implement invoice seeding logic here if needed
 	dycol := []domainDynamicColumn.DynamicColumn{
 		{
-			TableName: "invoices",
+			TableName: "invoice",
 			Name:      "pending_amount",
 			Type:      "float",
-			Formula: `
-			(
-				SELECT COALESCE(invoices.total_amount - SUM(p.amount), invoices.total_amount)
-				FROM payments p
-				WHERE p.invoice_id = invoices.id
+			Formula: fmt.Sprintf(`
+			WITH invoice_payments AS (
+				SELECT inv.id,
+					COALESCE(inv.total_amount - SUM(pmt.amount), inv.total_amount) AS pending_amount
+				FROM invoice inv
+				JOIN %s p ON inv.id = p.id
+				LEFT JOIN payment pmt ON pmt.invoice_id = inv.id AND pmt.is_deleted = false
+				WHERE inv.is_deleted = false
+				GROUP BY inv.id
 			)
-			`,
-			Dependencies: map[string]dynamiccolumn.Dependency{
-				"invoices": {
+			UPDATE invoice i
+			SET pending_amount = ip.pending_amount
+			FROM invoice_payments ip
+			WHERE i.id = ip.id AND i.pending_amount IS DISTINCT FROM ip.pending_amount
+			`, constants.TEMP_TABLE_NAME),
+			Dependencies: map[constants.TableName]dynamiccolumn.Dependency{
+				constants.TableNameInvoice: {
 					Columns: []string{"total_amount"},
 				},
-				"payments": {
+				constants.TableNamePayment: {
 					Columns:           []string{"amount", "invoice_id"},
-					RecordIdsSelector: "SELECT invoice_id FROM payments WHERE payments.id IN ({payments.ids}) UNION SELECT {payments:original.invoice_id} as invoice_id",
+					RecordIdsSelector: "SELECT invoice_id FROM payment WHERE payment.id IN ({payment.ids}) UNION SELECT {payment:original.invoice_id} as invoice_id",
 				},
 			},
 		},
 		{
-			TableName: "invoices",
+			TableName: "invoice",
 			Name:      "status",
 			Type:      "string",
-			Formula: `
+			Formula: fmt.Sprintf(`
 				CASE 
-					WHEN pending_amount <= 0 THEN 'Paid'
-					WHEN CURRENT_DATE - created_at > payment_terms * INTERVAL '1 day' THEN 'Overdue'
-					ELSE 'Pending' 
+					WHEN pending_amount <= 0 THEN '%s'
+					WHEN CURRENT_DATE - created_at > payment_terms * INTERVAL '1 day' THEN '%s'
+					ELSE '%s' 
 				END
-			`,
-			Dependencies: map[string]domainDynamicColumn.Dependency{
-				"invoices": {
+			`, constants.InvoiceStatusPaid, constants.InvoiceStatusOverdue, constants.InvoiceStatusPending),
+			Dependencies: map[constants.TableName]domainDynamicColumn.Dependency{
+				constants.TableNameInvoice: {
 					Columns: []string{"pending_amount", "created_at", "payment_terms"},
-				},
-			},
-		},
-		{
-			TableName: "invoices",
-			Name:      "force_payment",
-			Type:      "bool",
-			Formula: `
-				CASE 
-					WHEN (
-						SELECT status FROM companies c WHERE c.id = company_id
-					) = 'At Risk' THEN true
-					ELSE false
-				END
-			`,
-			Dependencies: map[string]domainDynamicColumn.Dependency{
-				"invoices": {
-					Columns: []string{"id"},
-				},
-				"companies": {
-					Columns:           []string{"status"},
-					RecordIdsSelector: "SELECT id FROM invoices WHERE company_id in ({companies.ids})",
 				},
 			},
 		},

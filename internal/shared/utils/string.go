@@ -10,15 +10,15 @@ import (
 
 func BuildFormulaSQL(formula string, contextObj map[string]interface{}) string {
 	// in formula, dynamic values are in format {table.column}
-	// e.g., {invoices.created_at}, {invoices.payment_terms}
+	// e.g., {invoice.created_at}, {invoice.payment_terms}
 	// This function replaces them with actual values from contextObj
 	// contextObj samples map[tableName]tableModel:
 	// {
-	//   "invoices": {
+	//   "invoice": {
 	//	 	"created_at": time.Time{},
 	//	 	"payment_terms": int,
 	//   },
-	//   "companies": {
+	//   "company": {
 	//	 	"status": string,
 	//	 	"is_active": bool,
 	//   },
@@ -163,4 +163,37 @@ func normalizeFormulaString(formula string) string {
 	re := regexp.MustCompile(`\s+`)
 	normalized := re.ReplaceAllString(formula, " ")
 	return strings.TrimSpace(normalized)
+}
+
+func FindFieldByGormColumn(model any, column string) (reflect.StructField, bool) {
+	t := reflect.TypeOf(model)
+
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return reflect.StructField{}, false
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		gormTag := field.Tag.Get("gorm")
+		if gormTag == "" {
+			continue
+		}
+
+		// gorm:"column:pending_amount;type:numeric"
+		tags := strings.Split(gormTag, ";")
+		for _, tag := range tags {
+			if strings.HasPrefix(tag, "column:") {
+				if strings.TrimPrefix(tag, "column:") == column {
+					return field, true
+				}
+			}
+		}
+	}
+
+	return reflect.StructField{}, false
 }

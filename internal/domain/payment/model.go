@@ -1,12 +1,12 @@
 package payment
 
 import (
-	"gin-demo/internal/shared/models"
+	"gin-demo/internal/shared/types"
 	"time"
 )
 
 type Payment struct {
-	models.GormModel
+	types.GormModel
 	Description string    `json:"description" gorm:"column:description"`
 	Amount      float64   `json:"amount" gorm:"column:amount" binding:"required"`
 	PaidAt      time.Time `json:"paid_at" gorm:"column:paid_at"`

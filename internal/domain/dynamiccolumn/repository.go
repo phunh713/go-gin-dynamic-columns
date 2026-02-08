@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"gin-demo/internal/shared/base"
+	"gin-demo/internal/shared/constants"
+	"gin-demo/internal/shared/types"
 	"gin-demo/internal/shared/utils"
 	"strings"
 )
@@ -12,22 +14,26 @@ import (
 type DynamicColumnRepository interface {
 	GetAll(ctx context.Context) []DynamicColumn
 	Create(ctx context.Context, column *DynamicColumn) (*DynamicColumn, error)
-	GetRefreshRecordById(ctx context.Context, table string, id int64) (interface{}, error)
+	GetRefreshRecordById(ctx context.Context, table constants.TableName, id int64) (interface{}, error)
 	GetRecordByDependency(ctx context.Context, dependency string) []DynamicColumn
 	RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error
-	FindDependantTableAndIds(ctx context.Context, table string, ctxObj map[string]interface{}, changes map[string]Dependency) *map[string][]int64
-	GetAllDependantsByChanges(ctx context.Context, table string, changes map[string]Dependency) []DynamicColumn
+	GetAllDependantsByChanges(ctx context.Context, table constants.TableName, changes map[constants.TableName]Dependency) []DynamicColumn
 	GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64
+	CreateTempIdsTable(ctx context.Context) error
+	CopyIdsToTempTable(ctx context.Context, ids []int64) error
+	TruncateTempTable(ctx context.Context) error
 }
 
 type dynamicColumnRepository struct {
 	base.BaseHelper
-	ModelsMap map[string]interface{}
+	ModelsMap         types.ModelsMap
+	modelRelationsMap types.ModelRelationsMap
 }
 
-func NewDynamicColumnRepository(modelMaps map[string]interface{}) DynamicColumnRepository {
+func NewDynamicColumnRepository(modelsMap types.ModelsMap, modelRelationsMap types.ModelRelationsMap) DynamicColumnRepository {
 	return &dynamicColumnRepository{
-		ModelsMap: modelMaps,
+		ModelsMap:         modelsMap,
+		modelRelationsMap: modelRelationsMap,
 	}
 }
 
@@ -36,7 +42,7 @@ func (r *dynamicColumnRepository) GetAll(ctx context.Context) []DynamicColumn {
 	return []DynamicColumn{}
 }
 
-func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context, table string, changes map[string]Dependency) []DynamicColumn {
+func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context, table constants.TableName, changes map[constants.TableName]Dependency) []DynamicColumn {
 	if len(changes) == 0 {
 		return nil
 	}
@@ -52,7 +58,7 @@ func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context,
 	// Remove the last comma
 	depTables = depTables[:len(depTables)-1]
 
-	query := fmt.Sprintf("SELECT * FROM dynamic_columns WHERE dependencies ?| ARRAY[%s]", depTables)
+	query := fmt.Sprintf("SELECT * FROM dynamic_column WHERE dependencies ?| ARRAY[%s]", depTables)
 	err := tx.Raw(query).Scan(&columns).Error
 	if err != nil {
 		return nil
@@ -64,7 +70,7 @@ func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context,
 /*
 * compareDepColumns filters dynamic columns whose dependencies intersect with the provided changes.
  */
-func (r *dynamicColumnRepository) compareDepColumns(columns []DynamicColumn, changes map[string]Dependency) []DynamicColumn {
+func (r *dynamicColumnRepository) compareDepColumns(columns []DynamicColumn, changes map[constants.TableName]Dependency) []DynamicColumn {
 	res := make([]DynamicColumn, 0)
 	for i := range columns {
 		colDeps := columns[i].Dependencies
@@ -92,7 +98,7 @@ func (r *dynamicColumnRepository) Create(ctx context.Context, column *DynamicCol
 	return column, nil
 }
 
-func (r *dynamicColumnRepository) GetRefreshRecordById(ctx context.Context, table string, id int64) (interface{}, error) {
+func (r *dynamicColumnRepository) GetRefreshRecordById(ctx context.Context, table constants.TableName, id int64) (interface{}, error) {
 	tx := r.GetDbTx(ctx)
 	modelType, exists := r.ModelsMap[table]
 	if !exists {
@@ -102,7 +108,7 @@ func (r *dynamicColumnRepository) GetRefreshRecordById(ctx context.Context, tabl
 	// Create a new addressable instance of the model type
 	result := utils.NewInstance(modelType)
 
-	err := tx.Table(table).Where("id = ?", id).Scan(result).Error
+	err := tx.Table(string(table)).Where("id = ?", id).Scan(result).Error
 	if err != nil {
 		return nil, err
 	}
@@ -118,67 +124,94 @@ func (r *dynamicColumnRepository) GetRecordByDependency(ctx context.Context, dep
 	tx := r.GetDbTx(ctx)
 	var results []DynamicColumn
 	// Use parameterized query with JSONB ? operator
-	err := tx.Raw("SELECT * FROM dynamic_columns WHERE dependencies \\? ?", dependency).Scan(&results).Error
+	err := tx.Raw("SELECT * FROM dynamic_column WHERE dependencies \\? ?", dependency).Scan(&results).Error
 	if err != nil {
 		return nil
 	}
 	return results
 }
 
-func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error {
-	query := strings.Join(strings.Fields(col.Formula), " ")
-	tx := r.GetDbTx(ctx).Debug()
-	setStm := fmt.Sprintf("%s = %s", col.Name, query)
+func (r *dynamicColumnRepository) CreateTempIdsTable(ctx context.Context) error {
+	tx := r.GetDbTx(ctx)
 
-	idsStr := make([]string, len(col.Ids))
-	for i, id := range col.Ids {
-		idsStr[i] = fmt.Sprintf("%d", id)
+	err := tx.Exec(fmt.Sprintf(`
+		CREATE TEMP TABLE %s (
+			id BIGINT PRIMARY KEY
+		) ON COMMIT DROP;
+	`, constants.TEMP_TABLE_NAME)).Error
+
+	if err != nil {
+		return err
 	}
 
-	if len(idsStr) == 0 {
-		idsStr = append(idsStr, "NULL")
-	}
+	return nil
+}
 
-	distinctFromFilter := fmt.Sprintf("%s IS DISTINCT FROM %s", col.Name, query)
-	updateQuery := fmt.Sprintf("UPDATE %s SET %s WHERE id IN (%s) AND %s", col.TableName, setStm, strings.Join(idsStr, ","), distinctFromFilter)
-	err := tx.Exec(updateQuery).Error
-
+func (r *dynamicColumnRepository) TruncateTempTable(ctx context.Context) error {
+	tx := r.GetDbTx(ctx)
+	err := tx.Exec(fmt.Sprintf("TRUNCATE %s", constants.TEMP_TABLE_NAME)).Error
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *dynamicColumnRepository) FindDependantTableAndIds(ctx context.Context, table string, ctxObj map[string]interface{}, changes map[string]Dependency) *map[string][]int64 {
+func (r *dynamicColumnRepository) CopyIdsToTempTable(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
 	tx := r.GetDbTx(ctx)
-	result := make(map[string][]int64)
-	dynamicColumns := r.GetAllDependantsByChanges(ctx, table, changes)
-	queries := r.getSelectorQueries(dynamicColumns, changes)
-	for tableName, recordSelectors := range queries {
-		for _, recordSelector := range recordSelectors {
-			if recordSelector == "" {
-				continue
+
+	// For millions of IDs, use optimized batched multi-row VALUES insert
+	// This is much faster than individual inserts or unnest for large datasets
+	batchSize := 5000 // Optimal batch size for PostgreSQL
+
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[i:end]
+
+		// Build multi-row VALUES clause: (1),(2),(3)...
+		var valueStrings strings.Builder
+		args := make([]interface{}, len(batch))
+
+		for j, id := range batch {
+			if j > 0 {
+				valueStrings.WriteString(",")
 			}
-			query := utils.BuildFormulaSQL(recordSelector, ctxObj)
-			// Use nullable int64 to handle NULL values from SQL
-			var nullableIds []sql.NullInt64
-			err := tx.Raw(query).Scan(&nullableIds).Error
-			if err != nil {
-				continue
-			}
-			// Filter out NULL values
-			for _, id := range nullableIds {
-				if id.Valid {
-					result[tableName] = append(result[tableName], id.Int64)
-				}
-			}
+			valueStrings.WriteString("(?)")
+			args[j] = id
+		}
+
+		// Single INSERT with multiple VALUES for maximum performance
+		query := fmt.Sprintf("INSERT INTO %s (id) VALUES %s",
+			constants.TEMP_TABLE_NAME,
+			valueStrings.String())
+
+		err := tx.Exec(query, args...).Error
+		if err != nil {
+			return err
 		}
 	}
-	return &result
+
+	return nil
 }
 
-func (r *dynamicColumnRepository) getSelectorQueries(columns []DynamicColumn, changes map[string]Dependency) map[string][]string {
-	res := map[string][]string{}
+func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error {
+	tx := r.GetDbTx(ctx).Debug()
+	query := strings.Join(strings.Fields(col.Formula), " ")
+	err := tx.Exec(query).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *dynamicColumnRepository) getSelectorQueries(columns []DynamicColumn, changes map[constants.TableName]Dependency) map[constants.TableName][]string {
+	res := map[constants.TableName][]string{}
 	for _, col := range columns {
 		// If no changes provided, return all record selectors by table name
 		if changes == nil {

@@ -18,7 +18,7 @@ func SeedCompanies(db *gorm.DB) {
 	ctx = context.WithValue(ctx, config.ContextKeyDB, db)
 	container := container.NewContainer()
 
-	for i := 1; i <= 50; i++ {
+	for i := 1; i <= 10; i++ {
 		start := time.Now()
 		company := company.Company{
 			Name:     "Company A " + fmt.Sprint(i),

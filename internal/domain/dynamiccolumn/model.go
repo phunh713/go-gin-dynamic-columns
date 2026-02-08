@@ -1,24 +1,26 @@
 package dynamiccolumn
 
+import "gin-demo/internal/shared/constants"
+
 type Dependency struct {
 	RecordIdsSelector string   // SQL query to find which records are affected by this dependency
 	Columns           []string // Columns from the dependency that are used
 }
 
 type DynamicColumn struct {
-	ID           int64                 `json:"id" gorm:"primaryKey;column:id"`
-	Name         string                `json:"name" gorm:"column:name"`
-	TableName    string                `json:"table_name" gorm:"column:table_name"`
-	Formula      string                `json:"formula" gorm:"column:formula"`
-	DefaultValue string                `json:"default_value" gorm:"column:default_value"`
-	Type         string                `json:"type" gorm:"column:type"`
-	Dependencies map[string]Dependency `json:"dependencies" gorm:"column:dependencies;type:jsonb;serializer:json"`
+	ID           int64                              `json:"id" gorm:"primaryKey;column:id"`
+	Name         string                             `json:"name" gorm:"column:name"`
+	TableName    constants.TableName                `json:"table_name" gorm:"column:table_name"`
+	Formula      string                             `json:"formula" gorm:"column:formula"`
+	DefaultValue string                             `json:"default_value" gorm:"column:default_value"`
+	Type         string                             `json:"type" gorm:"column:type"`
+	Dependencies map[constants.TableName]Dependency `json:"dependencies" gorm:"column:dependencies;type:jsonb;serializer:json"`
 }
 
 type DynamicColumnWithMetadata struct {
 	DynamicColumn
 	Ids    []int64 `json:"ids"`
-	ctxObj map[string]interface{}
+	ctxObj map[constants.TableName]interface{}
 }
 
 type CtxObjIds = map[string]struct {

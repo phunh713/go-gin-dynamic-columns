@@ -1,12 +1,12 @@
 package invoice
 
 import (
-	"gin-demo/internal/shared/models"
+	"gin-demo/internal/shared/types"
 	"time"
 )
 
 type Invoice struct {
-	models.GormModel
+	types.GormModel
 	InvoiceNumber string     `json:"invoice_number" gorm:"column:invoice_number;uniqueIndex"`
 	Description   string     `json:"description" gorm:"column:description"`
 	TotalAmount   float64    `json:"total_amount" gorm:"column:total_amount"`

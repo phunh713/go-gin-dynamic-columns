@@ -18,7 +18,7 @@ func SeedApprovals(db *gorm.DB) {
 	ctx = context.WithValue(ctx, config.ContextKeyDB, db)
 	container := container.NewContainer()
 
-	for i := 11; i <= 20; i++ {
+	for i := 1; i <= 10; i++ {
 		start := time.Now()
 		approval := approval.Approval{
 			CompanyId:    int64(i),

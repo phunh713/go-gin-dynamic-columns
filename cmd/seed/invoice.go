@@ -6,7 +6,7 @@ import (
 	"gin-demo/internal/application/config"
 	"gin-demo/internal/application/container"
 	"gin-demo/internal/domain/invoice"
-	"gin-demo/internal/shared/models"
+	"gin-demo/internal/shared/types"
 	"time"
 
 	"gorm.io/gorm"
@@ -29,7 +29,7 @@ func SeedInvoices(db *gorm.DB) {
 			ContractId:   int64(14),
 			PaymentTerms: j * 5,
 			TotalAmount:  float64(100 * j),
-			GormModel: models.GormModel{
+			GormModel: types.GormModel{
 				CreatedAt: createdAt,
 			},
 		}
