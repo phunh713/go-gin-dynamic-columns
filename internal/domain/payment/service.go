@@ -37,7 +37,7 @@ func (s *paymentService) Create(ctx context.Context, entity *Payment) (*Payment,
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNamePayment, []int64{created.Id}, constants.ActionCreate, nil, nil, entity)
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNamePayment, []int64{created.Id}, constants.ActionCreate, nil, entity)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (s *paymentService) Update(ctx context.Context, id int64, updatePayload *Pa
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNamePayment, []int64{id}, constants.ActionUpdate, nil, &original.Id, updatePayload)
+	err = s.dynamiccolumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNamePayment, []int64{id}, constants.ActionUpdate, &original.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}

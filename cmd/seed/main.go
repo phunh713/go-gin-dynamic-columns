@@ -34,10 +34,13 @@ func main() {
 
 	// Define all available seed functions
 	seedFuncs := map[string]func(*gorm.DB){
-		"dynamiccolumns": dynamiccolumn.Seed,
-		"companies":      SeedCompanies,
-		"invoices":       SeedInvoices,
-		"approvals":      SeedApprovals,
+		"dynamiccolumn": dynamiccolumn.Seed,
+		"company":       SeedCompanies,
+		"contract":      SeedContracts,
+		"invoice":       SeedInvoices,
+		"approval":      SeedApprovals,
+		"deployment":    SeedDeployments,
+		"employee":      SeedEmployees,
 	}
 
 	// If no domains specified, run all seeds

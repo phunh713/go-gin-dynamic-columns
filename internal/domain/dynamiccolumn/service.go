@@ -4,35 +4,55 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gin-demo/internal/shared/base"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/shared/types"
 	"gin-demo/internal/shared/utils"
+	"log/slog"
 	"regexp"
 	"strings"
 )
 
 type DynamicColumnService interface {
-	RefreshDynamicColumnsOfRecordIds(ctx context.Context, table constants.TableName, ids []int64, action constants.Action, changes map[constants.TableName]Dependency, originalRecordId *int64, actionPayload interface{}) error
-	CheckShouldRefreshDynamicColumn(ctx context.Context, table constants.TableName, action constants.Action, changes map[constants.TableName]Dependency, payload interface{}) (bool, map[constants.TableName]Dependency)
+	RefreshDynamicColumnsOfRecordIds(ctx context.Context, table constants.TableName, ids []int64, action constants.Action, originalRecordId *int64, actionPayload interface{}) error
+	CheckShouldRefreshDynamicColumn(ctx context.Context, table constants.TableName, action constants.Action, payload interface{}) (bool, map[constants.TableName]Dependency)
 	BuildFormula(table constants.TableName, col string, userFormula string, userVars string) (string, error)
 	ResolveTablesRelationLink(comparor constants.TableName, target constants.TableName, prev []RelationLink, visited map[constants.TableName]bool) ([]RelationLink, error)
+	Create(ctx context.Context, payload *DynamicColumnCreateRequest) (*DynamicColumn, error)
 }
 
 type dynamicColumnService struct {
 	dynamicColumnRepo DynamicColumnRepository
 	modelsMap         types.ModelsMap
 	modelRelationsMap types.ModelRelationsMap
+	logger            *slog.Logger
+	base.BaseHelper
 }
 
-func NewDynamicColumnService(dynamicColumnRepo DynamicColumnRepository, modelsMap types.ModelsMap, modelRelationsMap types.ModelRelationsMap) DynamicColumnService {
-	return &dynamicColumnService{dynamicColumnRepo: dynamicColumnRepo, modelsMap: modelsMap, modelRelationsMap: modelRelationsMap}
+func NewDynamicColumnService(dynamicColumnRepo DynamicColumnRepository,
+	modelsMap types.ModelsMap,
+	modelRelationsMap types.ModelRelationsMap,
+	logger *slog.Logger,
+) DynamicColumnService {
+	return &dynamicColumnService{dynamicColumnRepo: dynamicColumnRepo,
+		modelsMap:         modelsMap,
+		modelRelationsMap: modelRelationsMap,
+		logger:            logger,
+	}
 }
 
 func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
-	ctx context.Context, table constants.TableName, ids []int64, action constants.Action, changes map[constants.TableName]Dependency, originalRecordId *int64, actionPayload interface{}) error {
+	ctx context.Context, table constants.TableName, ids []int64, action constants.Action, originalRecordId *int64, actionPayload interface{}) error {
+	logPayload := r.GetLogPayload(ctx)
+	(*logPayload)["refresh_table"] = table
+	(*logPayload)["action_lead_to_refresh"] = action
+
 	// Check if action requires refreshing dynamic columns.
 	// Get changes slice to refresh dependant tables later.
-	shouldCheck, changes := r.CheckShouldRefreshDynamicColumn(ctx, table, action, changes, actionPayload)
+	shouldCheck, changes := r.CheckShouldRefreshDynamicColumn(ctx, table, action, actionPayload)
+	(*logPayload)["should_refresh"] = shouldCheck
+	(*logPayload)["changes"] = changes
+
 	if !shouldCheck {
 		return nil
 	}
@@ -48,13 +68,13 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 	// Create a temp table to store ids that need refreshing
 	err := r.dynamicColumnRepo.CreateTempIdsTable(ctx)
 	if err != nil {
-		fmt.Println("Error creating temp ids table:", err)
+		(*logPayload)["error"] = fmt.Sprintf("Error creating temp ids table: %v", err)
 		return err
 	}
 	for _, col := range orderedDynamicCols {
 		err := r.dynamicColumnRepo.CopyIdsToTempTable(ctx, col.Ids)
 		if err != nil {
-			fmt.Println("Error copying ids to temp ids table:", err)
+			(*logPayload)["error"] = fmt.Sprintf("Error copying ids to temp ids table: %v", err)
 			return err
 		}
 		err = r.dynamicColumnRepo.RefreshDynamicColumn(ctx, col)
@@ -73,10 +93,8 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 // CheckShouldRefreshDynamicColumn checks if the action requires refreshing dynamic columns
 func (r *dynamicColumnService) CheckShouldRefreshDynamicColumn(
 	ctx context.Context, table constants.TableName, action constants.Action,
-	changes map[constants.TableName]Dependency, payload interface{}) (bool, map[constants.TableName]Dependency) {
-	if changes == nil {
-		changes = make(map[constants.TableName]Dependency)
-	}
+	payload interface{}) (bool, map[constants.TableName]Dependency) {
+	changes := make(map[constants.TableName]Dependency)
 
 	var columns []string
 
@@ -127,11 +145,18 @@ func (r *dynamicColumnService) getAllDynamicColumnsFromChanges(ctx context.Conte
 }
 
 /*
+* determineRefreshOrder determines the sequence of refreshing dynamic columns based on their dependencies.
 * table is the original table where the changes happened
  */
-func (r *dynamicColumnService) determineRefreshOrder(ctx context.Context, table constants.TableName, ids []int64, dynamicCols []DynamicColumn, originalRecordId *int64) []DynamicColumnWithMetadata {
+func (r *dynamicColumnService) determineRefreshOrder(
+	ctx context.Context,
+	table constants.TableName,
+	ids []int64,
+	dynamicCols []DynamicColumn,
+	originalRecordId *int64,
+) []DynamicColumnWithMetadata {
 	result := make([]DynamicColumnWithMetadata, 0)
-	processed := make(map[string]bool) // O(1) lookup instead of O(n)
+	processed := make(map[string]bool)
 	refreshColNames := r.buildRefreshColumnNames(dynamicCols)
 
 	// Use index-based loop so appending to dynamicCols extends the loop
@@ -285,35 +310,33 @@ func (r *dynamicColumnService) resolveIdsFromMatchingDependencies(ctx context.Co
 }
 
 func (r *dynamicColumnService) BuildFormula(table constants.TableName, col string, userFormula string, userVars string) (string, error) {
-	vars, err := ResolveVariables(userVars)
+	// Step 1: Validate and parse variables
+	vars, err := r.resolveVariables(userVars)
 	if err != nil {
-		fmt.Println("error resolve variables")
 		return "", err
 	}
-	fmt.Println(vars)
 
-	resolvedFormula, resolvedCte := r.resolveFormula(userFormula, table)
-	resolvedCteValueStrs := make([]string, 0)
-	resolvedCteJoinStrs := make([]string, 0)
-	for _, cte := range resolvedCte {
-		cteValue := cte.Value
-		for _, v := range vars {
-			colName := strings.Split(v.Name, ".")[1]
-			cteValue = strings.ReplaceAll(cteValue, v.Name, v.Value+" AS "+colName)
-		}
-		resolvedCteValueStrs = append(resolvedCteValueStrs, cteValue)
-		resolvedCteJoinStrs = append(resolvedCteJoinStrs, cte.Join)
+	// Step 2: Resolve formula and related tables
+	resolvedFormula, relatedTables := r.resolveFormula(userFormula, table, vars)
+
+	// Step 3: Resolve CTEs for related tables
+	resolvedCtes, err := r.resolveCte(relatedTables, table, vars)
+	if err != nil {
+		return "", err
 	}
+
+	// Step 4: Build final formula string from template and built components
 	res := constants.FORMULA_TEMPLATE
 	res = strings.ReplaceAll(res, "{{t_name}}", string(table))
 	res = strings.ReplaceAll(res, "{{c_name}}", col)
 	res = strings.ReplaceAll(res, "{{formula}}", resolvedFormula)
-	res = strings.ReplaceAll(res, "{{cte}}", strings.Join(resolvedCteValueStrs, ",\n")+",\n")
-	res = strings.ReplaceAll(res, "{{cte_joins}}", strings.Join(resolvedCteJoinStrs, "\n"))
+	res = strings.ReplaceAll(res, "{{cte}}", resolvedCtes.CteValues)
+	res = strings.ReplaceAll(res, "{{cte_joins}}", resolvedCtes.CteJoinStrs)
 	return res, nil
 }
 
-func ResolveVariables(varStr string) ([]Variable, error) {
+// resolveVariables parses the variable definitions from a string and returns a slice of Variable structs
+func (r *dynamicColumnService) resolveVariables(varStr string) ([]Variable, error) {
 	res := make([]Variable, 0)
 	if varStr == "" {
 		return res, nil
@@ -322,6 +345,7 @@ func ResolveVariables(varStr string) ([]Variable, error) {
 	splitVarStr := strings.Split(varStr, "\n")
 
 	for _, i := range splitVarStr {
+		i = strings.TrimSpace(i)
 		if i == "" {
 			continue
 		}
@@ -344,14 +368,21 @@ func ResolveVariables(varStr string) ([]Variable, error) {
 			return nil, errors.New("Variable definition error: Regex no match")
 		}
 
-		vName := matches[1]
-		vName = strings.ReplaceAll(vName, "{{", "")
-		vName = strings.ReplaceAll(vName, "}}", "")
-		v.Name = vName
+		v.Name = matches[1]
 		vValue := matches[2]
+		valueRegex := regexp.MustCompile(`{{(\w+)}}\.\w+`)
+
+		valueMatches := valueRegex.FindAllStringSubmatch(vValue, -1)
+		prev := valueMatches[0][1]
+		for i := 1; i < len(valueMatches); i++ {
+			if valueMatches[i][1] != prev {
+				return nil, errors.New("Variable definition error: Multiple table references in one variable is not supported")
+			}
+		}
 		vValue = strings.ReplaceAll(vValue, "{{", "")
 		vValue = strings.ReplaceAll(vValue, "}}", "")
 		v.Value = vValue
+		v.Table = constants.TableName(valueMatches[0][1])
 
 		res = append(res, v)
 	}
@@ -359,9 +390,11 @@ func ResolveVariables(varStr string) ([]Variable, error) {
 	return res, nil
 }
 
-func (r *dynamicColumnService) resolveFormula(formulaStr string, table constants.TableName) (string, []FormulaCte) {
+// resolveFormula replaces table and column placeholders in the formula string
+// placeholders are in the format {{table}}.column
+func (r *dynamicColumnService) resolveFormula(formulaStr string, table constants.TableName, vars []Variable) (string, RelatedTables) {
 	re := regexp.MustCompile(`{{(\w+)}}\.(\w+)`)
-	cte := make(map[constants.TableName][]string)
+	relatedTables := make(RelatedTables)
 
 	replacedFormula := re.ReplaceAllStringFunc(formulaStr, func(m string) string {
 		sub := re.FindStringSubmatch(m)
@@ -369,106 +402,92 @@ func (r *dynamicColumnService) resolveFormula(formulaStr string, table constants
 		col := sub[2]
 		res := string(t) + "." + col
 		if t != table {
-			cte[t] = utils.AppendUnique(cte[t], col)
+			relatedTables[t] = utils.AppendUnique(relatedTables[t], col)
 			res = "cte_" + res
 		}
 		return res
 	})
 
-	resolvedCte, _ := r.resolveCte(cte, table)
-	return replacedFormula, resolvedCte
+	for _, v := range vars {
+		relatedTables[v.Table] = utils.AppendUnique(relatedTables[v.Table], v.Name)
+	}
+
+	return replacedFormula, relatedTables
 }
 
-func (r *dynamicColumnService) resolveCte(cteNames map[constants.TableName][]string, rootTable constants.TableName) ([]FormulaCte, error) {
-	result := make([]FormulaCte, 0)
-	for joinTable, joinCols := range cteNames {
-		cteLinks, err := r.ResolveTablesRelationLink(rootTable, joinTable, nil, nil)
+// resolveCte builds CTE strings for related tables
+func (r *dynamicColumnService) resolveCte(relatedTables RelatedTables, rootTable constants.TableName, vars []Variable) (*CteStrings, error) {
+	ctes := make([]FormulaCte, 0)
+	for relatedTable, relatedCol := range relatedTables {
+		cteLinks, err := r.ResolveTablesRelationLink(rootTable, relatedTable, nil, nil)
 		if err != nil {
 			return nil, err
 		}
-		for i, cteLink := range cteLinks {
-			var currentRootTable constants.TableName
-			if i == 0 {
-				currentRootTable = rootTable
-			} else {
-				currentRootTable = cteLinks[i-1].Table
-			}
-			currentJoinCols := joinCols
-			if i < len(cteLinks)-1 {
-				currentJoinCols = nil
-			}
-			cte, err := r.createCte(currentRootTable, cteLink, currentJoinCols, result)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, *cte)
+		cte, err := r.createCte(rootTable, cteLinks, relatedCol, vars)
+		if err != nil {
+			return nil, err
 		}
+		ctes = append(ctes, *cte)
+	}
+	result := &CteStrings{}
+	for _, cte := range ctes {
+		result.CteValues += cte.Value + ",\n"
+		result.CteJoinStrs += cte.Join + "\n"
 	}
 	return result, nil
 }
 
 func (r *dynamicColumnService) createCte(
 	rootTable constants.TableName,
-	cteLink RelationLink,
+	cteLinks []RelationLink,
 	joinCols []string,
-	resolvedCte []FormulaCte,
+	vars []Variable,
 ) (*FormulaCte, error) {
-	for _, existingCte := range resolvedCte {
-		if existingCte.Name == string(rootTable)+"_"+string(cteLink.Table) {
-			return nil, errors.New("CTE already created")
-		}
-	}
 	var cte FormulaCte
-	cte.Name = string(rootTable) + "_" + string(cteLink.Table)
-	cte.Join = fmt.Sprintf("LEFT JOIN %s cte_%s ON cte_%s.%s_id = %s.id", cte.Name, cteLink.Table, cteLink.Table, rootTable, rootTable)
+	joinTable := cteLinks[len(cteLinks)-1].Table
+	cte.Name = string(rootTable) + "_" + string(joinTable)
+	cte.Join = fmt.Sprintf("LEFT JOIN %s cte_%s ON cte_%s.id = %s.id", cte.Name, joinTable, joinTable, rootTable)
 	for i, col := range joinCols {
-		joinCols[i] = string(cteLink.Table) + "." + col
+		joinCols[i] = string(joinTable) + "." + col
 	}
 	selectCols := strings.Join(joinCols, ", ")
 	if selectCols != "" {
 		selectCols = ", " + selectCols
 	}
-	selectId := ""
-	var fromTable constants.TableName = ""
-	joinStm := ""
-	groupStm := ""
-	onId := "id"
-	if cteLink.Relation == constants.TableRelationManyToOne {
-		selectId = fmt.Sprintf("%s.id AS %s_id", rootTable, rootTable)
-		fromTable = rootTable
-		joinStm = fmt.Sprintf("JOIN %s ON %s.id = %s.%s_id", cteLink.Table, cteLink.Table, rootTable, cteLink.Table)
+	for _, v := range vars {
+		selectCols = strings.ReplaceAll(selectCols, string(joinTable)+"."+v.Name, v.Value+" AS "+v.Name)
 	}
-	if cteLink.Relation == constants.TableRelationOneToMany {
-		selectId = fmt.Sprintf("%s.%s_id", cteLink.Table, rootTable)
-		fromTable = cteLink.Table
-		onId = fmt.Sprintf("%s_id", rootTable)
-		groupStm = fmt.Sprintf("GROUP BY %s.%s_id", cteLink.Table, rootTable)
+
+	groupByCols := make([]string, 0)
+	for _, joinCol := range joinCols {
+		foundVar := false
+		for _, variable := range vars {
+			if string(variable.Table)+"."+variable.Name == joinCol {
+				foundVar = true
+				break
+			}
+		}
+		if !foundVar {
+			groupByCols = utils.AppendUnique(groupByCols, joinCol)
+		}
 	}
+	groupByColsStr := strings.Join(groupByCols, ", ")
+	if groupByColsStr != "" {
+		groupByColsStr = ", " + groupByColsStr
+	}
+
+	selectId := rootTable + "." + "id"
+	joinStms := r.createJoinStmFromCteLinks(cteLinks, rootTable)
 	cte.Value = fmt.Sprintf(`
 			%s_%s AS (
-				SELECT %s%s
+				SELECT %s %s
 				FROM %s
-				JOIN %s tdi ON %s.%s = tdi.id
+				JOIN %s tdi ON %s.id = tdi.id
 				%s
-				%s
+				GROUP BY %s %s
 			)
-		`, rootTable, cteLink.Table, selectId, selectCols, fromTable, constants.TEMP_TABLE_NAME, fromTable, onId, joinStm, groupStm)
+		`, rootTable, joinTable, selectId, selectCols, rootTable, constants.TEMP_TABLE_NAME, rootTable, strings.Join(joinStms, " \n"), selectId, groupByColsStr)
 	return &cte, nil
-}
-
-func (r *dynamicColumnService) resolveTableRelation(checkedTable constants.TableName, targetTable constants.TableName) constants.TableRelation {
-	checkedTableModel := r.modelsMap[checkedTable]
-	_, exists := utils.FindFieldByGormColumn(checkedTableModel, string(targetTable)+"_"+"id")
-	if exists {
-		return constants.TableRelationManyToOne
-	}
-	targetTableModel := r.modelsMap[targetTable]
-	_, exists = utils.FindFieldByGormColumn(targetTableModel, string(checkedTable)+"_"+"id")
-	if exists {
-		return constants.TableRelationOneToMany
-	}
-
-	return constants.TableRelationNotRelated
 }
 
 func (r *dynamicColumnService) ResolveTablesRelationLink(comparor constants.TableName, target constants.TableName, prev []RelationLink, visited map[constants.TableName]bool) ([]RelationLink, error) {
@@ -520,4 +539,130 @@ func (r *dynamicColumnService) ResolveTablesRelationLink(comparor constants.Tabl
 		}
 	}
 	return nil, errors.New("No relation found")
+}
+
+func (r *dynamicColumnService) createJoinStmFromCteLinks(cteLinks []RelationLink, rootTable constants.TableName) []string {
+	joinStms := make([]string, 0)
+	for i, cteLink := range cteLinks {
+		joinerCol := ""
+		joineeCol := ""
+		prevTableName := ""
+		if cteLink.Relation == constants.TableRelationManyToOne {
+			if i == 0 {
+				prevTableName = string(rootTable)
+			} else {
+				prevTableName = string(cteLinks[i-1].Table)
+			}
+			joinerCol = prevTableName + "." + string(cteLink.Table) + "_id"
+			joineeCol = string(cteLink.Table) + ".id"
+		}
+		if cteLink.Relation == constants.TableRelationOneToMany {
+			if i == 0 {
+				prevTableName = string(rootTable)
+			} else {
+				prevTableName = string(cteLinks[i-1].Table)
+			}
+			joinerCol = string(cteLink.Table) + "." + string(prevTableName) + "_id"
+			joineeCol = prevTableName + ".id"
+		}
+		joinStms = append(joinStms, fmt.Sprintf("LEFT JOIN %s ON %s = %s AND %s.is_deleted = false", cteLink.Table, joinerCol, joineeCol, cteLink.Table))
+	}
+	return joinStms
+}
+
+func (r *dynamicColumnService) buildDependencies(formula string, variables string, rootTable constants.TableName) (map[constants.TableName]Dependency, error) {
+	resolvedVars, err := r.resolveVariables(variables)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range resolvedVars {
+		formula = strings.ReplaceAll(formula, v.Name, v.Value)
+	}
+
+	re := regexp.MustCompile(`{{(\w+)}}\.(\w+)`)
+
+	// Find All tables in the formula
+	matches := re.FindAllStringSubmatch(formula+variables, -1)
+
+	dependencies := make(map[constants.TableName]Dependency)
+
+	// Loop through all tables to start building dependencies
+	for _, match := range matches {
+		tableName := constants.TableName(match[1])
+
+		// find out how table is related to root table (maybe through some middle tables)
+		cteLinks := make([]RelationLink, 0)
+		if tableName != rootTable {
+			cteLinks, err = r.ResolveTablesRelationLink(tableName, rootTable, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+		names := []constants.TableName{tableName}
+		for _, link := range cteLinks {
+			names = append(names, link.Table)
+		}
+
+		for _, name := range names {
+			dep := dependencies[name]
+
+			// if table (name) is in the formula, add the column of the table to columns
+			// if not, it must be middle table, so id and is_deleted are added as dependencies
+			if name == constants.TableName(match[1]) {
+				dep.Columns = utils.AppendUnique(dep.Columns, match[2])
+			} else {
+				dep.Columns = utils.AppendUnique(dep.Columns, "is_deleted", "id")
+			}
+			joinStm := ""
+
+			// root table does not need record selector because it's directly refreshed based on the changed record ids
+			// while other tables need to be joined back to root table to select the affected records
+			if name != rootTable {
+				joinStm, err = r.buildDependencySelector(name, rootTable)
+				if err != nil {
+					return nil, err
+				}
+			}
+			dep.RecordIdsSelector = joinStm
+			dependencies[name] = dep
+		}
+	}
+
+	return dependencies, nil
+}
+
+func (r *dynamicColumnService) buildDependencySelector(depTable constants.TableName, rootTable constants.TableName) (string, error) {
+	cteLinks, err := r.ResolveTablesRelationLink(depTable, rootTable, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	joinStms := r.createJoinStmFromCteLinks(cteLinks, depTable)
+	joinStr := fmt.Sprintf("SELECT %s.id FROM %s %s WHERE %s.id IN ({%s.ids}) GROUP BY %s.id", rootTable, depTable, strings.Join(joinStms, " "), depTable, depTable, rootTable)
+	joinStr = strings.ReplaceAll(joinStr, "LEFT JOIN", "JOIN") // Use INNER JOIN for selector to ensure only matching records are returned
+	return joinStr, nil
+}
+
+func (r *dynamicColumnService) Create(ctx context.Context, payload *DynamicColumnCreateRequest) (*DynamicColumn, error) {
+	formula, err := r.BuildFormula(payload.TableName, payload.Name, payload.Formula, payload.Variables)
+	if err != nil {
+		return nil, err
+	}
+	dependencies, err := r.buildDependencies(payload.Formula, payload.Variables, payload.TableName)
+	if err != nil {
+		return nil, err
+	}
+	dynamicColumn := &DynamicColumn{
+		TableName:    payload.TableName,
+		Name:         payload.Name,
+		Type:         payload.Type,
+		Formula:      formula,
+		Dependencies: dependencies,
+		Variables:    payload.Variables,
+	}
+
+	created, err := r.dynamicColumnRepo.Create(ctx, dynamicColumn)
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
 }

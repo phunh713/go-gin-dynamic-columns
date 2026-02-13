@@ -47,7 +47,7 @@ func (r *dynamicColumnRepository) GetAllDependantsByChanges(ctx context.Context,
 		return nil
 	}
 
-	tx := r.GetDbTx(ctx).Debug()
+	tx := r.GetDbTx(ctx)
 	var columns []DynamicColumn
 
 	depTables := ""
@@ -201,7 +201,7 @@ func (r *dynamicColumnRepository) CopyIdsToTempTable(ctx context.Context, ids []
 }
 
 func (r *dynamicColumnRepository) RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error {
-	tx := r.GetDbTx(ctx).Debug()
+	tx := r.GetDbTx(ctx)
 	query := strings.Join(strings.Fields(col.Formula), " ")
 	err := tx.Exec(query).Error
 	if err != nil {

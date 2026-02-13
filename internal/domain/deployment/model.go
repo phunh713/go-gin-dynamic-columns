@@ -17,6 +17,7 @@ type Deployment struct {
 	CheckinAt   *time.Time `json:"checkin_at" gorm:"column:checkin_at"`
 	CheckoutAt  *time.Time `json:"checkout_at" gorm:"column:checkout_at"`
 	IsCancelled bool       `json:"is_cancelled" gorm:"column:is_cancelled;default:false"`
+	CanStart    bool       `json:"can_start" gorm:"column:can_start;default:false"`
 }
 
 type DeploymentUpdateRequest struct {

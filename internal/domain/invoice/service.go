@@ -38,7 +38,7 @@ func (s *invoiceService) Create(ctx context.Context, invoice *Invoice) (*Invoice
 	if err != nil {
 		return nil, err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{invoice.Id}, constants.ActionCreate, nil, nil, invoice)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{invoice.Id}, constants.ActionCreate, nil, invoice)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (s *invoiceService) Update(ctx context.Context, id int64, updatePayload *In
 	if err != nil {
 		return nil, err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{id}, constants.ActionUpdate, nil, &originalInvoice.Id, updatePayload)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{id}, constants.ActionUpdate, &originalInvoice.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (s *invoiceService) Delete(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{id}, constants.ActionDelete, nil, &originalInvoice.Id, nil)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, []int64{id}, constants.ActionDelete, &originalInvoice.Id, nil)
 	return err
 }
 
@@ -94,7 +94,7 @@ func (s *invoiceService) CreateMultiple(ctx context.Context, invoices []Invoice)
 	for _, invoice := range createdInvoices {
 		ids = append(ids, invoice.Id)
 	}
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, ids, constants.ActionCreate, nil, nil, createdInvoices)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameInvoice, ids, constants.ActionCreate, nil, nil)
 	if err != nil {
 		return nil, err
 	}

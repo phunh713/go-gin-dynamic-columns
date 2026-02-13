@@ -25,4 +25,5 @@ type InvoiceUpdateRequest struct {
 	DueDate       *time.Time `json:"due_date,omitempty"`
 	PaymentTerms  *int       `json:"payment_terms,omitempty"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`
+	CreatedAt     *time.Time `json:"created_at,omitempty"`
 }

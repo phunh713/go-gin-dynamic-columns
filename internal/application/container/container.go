@@ -1,6 +1,7 @@
 package container
 
 import (
+	"gin-demo/internal/application/config"
 	"gin-demo/internal/domain/approval"
 	"gin-demo/internal/domain/company"
 	"gin-demo/internal/domain/contract"
@@ -12,9 +13,13 @@ import (
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/shared/types"
 	"gin-demo/internal/shared/utils"
+	"log/slog"
 )
 
 type Container struct {
+	// Logger
+	Logger *slog.Logger
+
 	// Shared Dependencies can be added here
 	DynamicColumnRepository dynamiccolumn.DynamicColumnRepository
 	DynamicColumnService    dynamiccolumn.DynamicColumnService
@@ -71,12 +76,16 @@ func NewModelsMap() types.ModelsMap {
 func NewContainer() *Container {
 	c := &Container{}
 
+	// Logger
+	logger := config.NewLogger()
+	c.Logger = logger
+
 	// Shared Dependencies can be initialized here
 	modelsMap := NewModelsMap()
 	modelRelationsMap := utils.BuildRelationMap(modelsMap)
 
 	c.DynamicColumnRepository = dynamiccolumn.NewDynamicColumnRepository(modelsMap, modelRelationsMap)
-	c.DynamicColumnService = dynamiccolumn.NewDynamicColumnService(c.DynamicColumnRepository, modelsMap, modelRelationsMap)
+	c.DynamicColumnService = dynamiccolumn.NewDynamicColumnService(c.DynamicColumnRepository, modelsMap, modelRelationsMap, logger)
 
 	// Invoice
 	c.InvoiceRepository = invoice.NewInvoiceRepository()

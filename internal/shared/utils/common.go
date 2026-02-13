@@ -87,11 +87,29 @@ func GetStructFieldJsonTags(model interface{}) []string {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		fieldValue := v.Field(i)
+
 		tag := field.Tag.Get("json")
 		if tag != "" && tag != "-" {
 			// Extract field name before comma (removes omitempty, string, etc.)
 			fieldName := strings.Split(tag, ",")[0]
 			jsonTags = append(jsonTags, fieldName)
+		}
+
+		// Recursively handle nested structs (only if exported)
+		if field.PkgPath == "" { // Field is exported
+			fieldType := field.Type
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
+			if fieldType.Kind() == reflect.Struct {
+				// Create a new instance if it's a pointer and nil
+				if fieldValue.Kind() == reflect.Ptr && fieldValue.IsNil() {
+					fieldValue = reflect.New(fieldType)
+				}
+				nestedTags := GetStructFieldJsonTags(fieldValue.Interface())
+				jsonTags = append(jsonTags, nestedTags...)
+			}
 		}
 	}
 	return jsonTags
@@ -119,6 +137,18 @@ func GetNonZeroStructFieldJsonTags(model interface{}) []string {
 			// Only include fields that have non-zero values (were actually set in JSON)
 			if !fieldValue.IsZero() {
 				jsonTags = append(jsonTags, fieldName)
+			}
+		}
+
+		// Recursively handle nested structs (only if exported)
+		if field.PkgPath == "" { // Field is exported
+			fieldType := field.Type
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
+			if fieldType.Kind() == reflect.Struct && !fieldValue.IsZero() {
+				nestedTags := GetNonZeroStructFieldJsonTags(fieldValue.Interface())
+				jsonTags = append(jsonTags, nestedTags...)
 			}
 		}
 	}

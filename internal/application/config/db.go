@@ -33,8 +33,9 @@ func NewDB(configEnv *ConfigEnv) *gorm.DB {
 			Colorful:                  true,
 		},
 	)
+	fmt.Println("Connecting to database...", newLogger)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: newLogger,
+		Logger: nil,
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true,
 		},

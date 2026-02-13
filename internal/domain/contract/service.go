@@ -11,6 +11,7 @@ type ContractService interface {
 	GetAll(ctx context.Context) []Contract
 	GetById(ctx context.Context, id int64) (*Contract, error)
 	Create(ctx context.Context, entity *Contract) (*Contract, error)
+	CreateMultiple(ctx context.Context, contracts []Contract) ([]Contract, error)
 	Update(ctx context.Context, id int64, updatePayload *ContractUpdateRequest) (*Contract, error)
 	Delete(ctx context.Context, id int64) error
 }
@@ -42,7 +43,7 @@ func (s *contractService) Create(ctx context.Context, entity *Contract) (*Contra
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{entity.Id}, constants.ActionCreate, nil, nil, entity)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{entity.Id}, constants.ActionCreate, nil, entity)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func (s *contractService) Update(ctx context.Context, id int64, updatePayload *C
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{id}, constants.ActionUpdate, nil, &originalEntity.Id, updatePayload)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{id}, constants.ActionUpdate, &originalEntity.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +98,23 @@ func (s *contractService) Delete(ctx context.Context, id int64) error {
 	}
 
 	// Refresh dynamic columns after deletion
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{id}, constants.ActionDelete, nil, &originalEntity.Id, nil)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, []int64{id}, constants.ActionDelete, &originalEntity.Id, nil)
 	return err
+}
+
+func (s *contractService) CreateMultiple(ctx context.Context, contracts []Contract) ([]Contract, error) {
+	createdContracts, err := s.contractRepo.CreateMultiple(ctx, contracts)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for _, contract := range createdContracts {
+		ids = append(ids, contract.Id)
+	}
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameContract, ids, constants.ActionCreate, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }

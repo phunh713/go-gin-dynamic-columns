@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS deployment (
     start_date TIMESTAMPTZ,
     end_date TIMESTAMPTZ,
     status VARCHAR(50) NOT NULL DEFAULT 'active',
+    can_start BOOLEAN NOT NULL DEFAULT FALSE,
     employee_id BIGINT UNIQUE,
     role VARCHAR(255),
     checkin_at TIMESTAMPTZ,
@@ -152,6 +153,7 @@ CREATE TABLE IF NOT EXISTS dynamic_column (
     default_value TEXT,
     type VARCHAR(50) NOT NULL,
     dependencies JSONB,
+    variables TEXT NOT NULL,
     CONSTRAINT unique_dynamic_column_table_name UNIQUE (table_name, name)
 );
 

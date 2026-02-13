@@ -42,7 +42,7 @@ func (s *employeeService) Create(ctx context.Context, entity *Employee) (*Employ
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{entity.Id}, constants.ActionCreate, nil, nil, entity)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{entity.Id}, constants.ActionCreate, nil, entity)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (s *employeeService) Update(ctx context.Context, id int64, updatePayload *E
 	}
 
 	// Refresh dynamic columns
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionUpdate, nil, &originalEntity.Id, updatePayload)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionUpdate, &originalEntity.Id, updatePayload)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +97,6 @@ func (s *employeeService) Delete(ctx context.Context, id int64) error {
 	}
 
 	// Refresh dynamic columns after deletion
-	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionDelete, nil, &originalEntity.Id, nil)
+	err = s.dynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableNameEmployee, []int64{id}, constants.ActionDelete, &originalEntity.Id, nil)
 	return err
 }
