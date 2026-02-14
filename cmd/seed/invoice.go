@@ -7,12 +7,13 @@ import (
 	"gin-demo/internal/application/container"
 	"gin-demo/internal/domain/invoice"
 	"gin-demo/internal/shared/types"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-func SeedInvoices(db *gorm.DB) {
+func SeedInvoices(db *gorm.DB, logger *slog.Logger) {
 	startTotal := time.Now()
 
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gin-demo/cmd/seed/dynamiccolumn"
 	"gin-demo/internal/application/config"
+	"log/slog"
 	"strings"
 
 	"gorm.io/gorm"
@@ -33,7 +34,7 @@ func main() {
 	}
 
 	// Define all available seed functions
-	seedFuncs := map[string]func(*gorm.DB){
+	seedFuncs := map[string]func(*gorm.DB, *slog.Logger){
 		"dynamiccolumn": dynamiccolumn.Seed,
 		"company":       SeedCompanies,
 		"contract":      SeedContracts,
@@ -43,18 +44,17 @@ func main() {
 		"employee":      SeedEmployees,
 	}
 
+	logger := config.NewLogger()
 	// If no domains specified, run all seeds
 	if len(domainsToSeed) == 0 {
-		dynamiccolumn.Seed(db)
+		dynamiccolumn.Seed(db, logger)
 		fmt.Println("Dynamic columns seeded successfully")
 
-		SeedCompanies(db)
-		fmt.Println("Companies seeded successfully")
 	} else {
 		// Run only specified domains
 		for _, domain := range domainsToSeed {
 			if seedFunc, exists := seedFuncs[domain]; exists {
-				seedFunc(db)
+				seedFunc(db, logger)
 				fmt.Printf("%s seeded successfully\n", domain)
 			} else {
 				fmt.Printf("Warning: Unknown domain '%s', skipping...\n", domain)

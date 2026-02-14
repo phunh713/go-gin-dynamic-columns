@@ -117,7 +117,7 @@ package ${DOMAIN_NAME_LOWER}
 import (
 	"context"
 	"errors"
-	"gin-demo/internal/domain/dynamiccolumn"
+	"gin-demo/internal/system/dynamiccolumn"
 	"gin-demo/internal/shared/constants"
 )
 

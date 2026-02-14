@@ -4,7 +4,7 @@ import (
 	"context"
 	"gin-demo/internal/application/config"
 	"gin-demo/internal/application/container"
-	"gin-demo/internal/domain/dynamiccolumn"
+	"gin-demo/internal/system/dynamiccolumn"
 )
 
 func main() {
@@ -32,6 +32,7 @@ func main() {
 						WHEN deployment_non_completed_count > 0 THEN 'Expired - Deployment Pending'
 						WHEN COALESCE(invoice_total_count, 0) = 0 THEN 'Completed - No Invoice'
 						WHEN invoice_overdue_count > 0 THEN 'Expired - Invoice Overdue'
+						WHEN invoice_pending_count > 0 THEN 'Expired - Invoice Pending'
 						ELSE 'Completed'
 					END
 				WHEN COALESCE(deployment_total_count, 0) = 0 THEN 'Need Attention - No Deployment'
@@ -43,6 +44,7 @@ func main() {
 			var deployment_total_count = COUNT({{deployment}}.id)
 			var invoice_total_count = COUNT({{invoice}}.id)
 			var invoice_overdue_count = COUNT({{invoice}}.id) FILTER (WHERE {{invoice}}.status = 'Overdue')
+			var invoice_pending_count = COUNT({{invoice}}.id) FILTER (WHERE {{invoice}}.status = 'Pending')
 		`,
 		Type: "string",
 	}

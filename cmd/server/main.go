@@ -10,8 +10,12 @@ import (
 
 func main() {
 	configEnv := config.LoadEnv()
+	logger := config.NewLogger()
 	dbPool := config.NewDB(configEnv)
-	app := config.NewApp(configEnv, middlewares.DbMiddleware(dbPool))
+	app := config.NewServer(
+		configEnv, middlewares.LogMiddleware(logger),
+		middlewares.DbMiddleware(dbPool),
+	)
 
 	// Start Dependency Injection and Route Setup
 	container := container.NewContainer()
@@ -19,5 +23,5 @@ func main() {
 
 	utils.PrettyPrintRoutes(app.Routes())
 
-	app.Run(fmt.Sprintf(":%s", configEnv.AppPort))
+	app.Run(fmt.Sprintf(":%s", app.Port))
 }

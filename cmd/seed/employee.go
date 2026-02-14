@@ -6,12 +6,13 @@ import (
 	"gin-demo/internal/application/config"
 	"gin-demo/internal/application/container"
 	"gin-demo/internal/domain/employee"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-func SeedEmployees(db *gorm.DB) {
+func SeedEmployees(db *gorm.DB, logger *slog.Logger) {
 	totalStart := time.Now()
 	ctx := context.Background()
 	// add db to ctx so that it can be used in service/repository layers

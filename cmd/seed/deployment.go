@@ -6,17 +6,20 @@ import (
 	"gin-demo/internal/application/config"
 	"gin-demo/internal/application/container"
 	"gin-demo/internal/domain/deployment"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-func SeedDeployments(db *gorm.DB) {
+func SeedDeployments(db *gorm.DB, logger *slog.Logger) {
 	totalStart := time.Now()
 	ctx := context.Background()
 	// add db to ctx so that it can be used in service/repository layers
 	container := container.NewContainer()
 	ctx = context.WithValue(ctx, config.ContextKeyDB, db)
+	logPayload := &config.LogPayload{}
+	ctx = context.WithValue(ctx, config.LogPayloadKey, logPayload)
 	contracts := container.ContractService.GetAll(ctx)
 	fmt.Println(len(contracts))
 	for _, contract := range contracts {

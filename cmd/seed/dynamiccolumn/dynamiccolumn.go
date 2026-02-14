@@ -1,10 +1,14 @@
 package dynamiccolumn
 
-import "gorm.io/gorm"
+import (
+	"log/slog"
 
-func Seed(db *gorm.DB) {
-	seedCompanies(db)
-	seedInvoices(db)
-	seedContracts(db)
-	seedDeployments(db)
+	"gorm.io/gorm"
+)
+
+func Seed(db *gorm.DB, logger *slog.Logger) {
+	seedCompanies(db, logger)
+	seedInvoices(db, logger)
+	seedContracts(db, logger)
+	seedDeployments(db, logger)
 }

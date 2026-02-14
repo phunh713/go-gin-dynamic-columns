@@ -3,15 +3,14 @@ package middlewares
 import (
 	"context"
 	"gin-demo/internal/application/config"
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
-func LogMiddleware(db *gorm.DB) gin.HandlerFunc {
+func LogMiddleware(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Start a transaction
-		logger := config.NewLogger()
 		logPayload := &config.LogPayload{}
 
 		// Store the transaction in both gin context and request context

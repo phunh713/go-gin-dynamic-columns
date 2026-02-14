@@ -18,7 +18,7 @@ type DynamicColumnRepository interface {
 	GetRecordByDependency(ctx context.Context, dependency string) []DynamicColumn
 	RefreshDynamicColumn(ctx context.Context, col DynamicColumnWithMetadata) error
 	GetAllDependantsByChanges(ctx context.Context, table constants.TableName, changes map[constants.TableName]Dependency) []DynamicColumn
-	GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64
+	GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) ([]int64, error)
 	CreateTempIdsTable(ctx context.Context) error
 	CopyIdsToTempTable(ctx context.Context, ids []int64) error
 	TruncateTempTable(ctx context.Context) error
@@ -165,7 +165,7 @@ func (r *dynamicColumnRepository) CopyIdsToTempTable(ctx context.Context, ids []
 
 	// For millions of IDs, use optimized batched multi-row VALUES insert
 	// This is much faster than individual inserts or unnest for large datasets
-	batchSize := 5000 // Optimal batch size for PostgreSQL
+	batchSize := 50000 // Optimal batch size for PostgreSQL
 
 	for i := 0; i < len(ids); i += batchSize {
 		end := i + batchSize
@@ -236,13 +236,13 @@ func (r *dynamicColumnRepository) getSelectorQueries(columns []DynamicColumn, ch
 	return res
 }
 
-func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) []int64 {
+func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySelector string, ctxObj map[string]interface{}) ([]int64, error) {
 	var ids []sql.NullInt64
 	tx := r.GetDbTx(ctx)
 	query := utils.BuildFormulaSQL(querySelector, ctxObj)
 	err := tx.Raw(query).Scan(&ids).Error
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	// Convert []sql.NullInt64 to []int64
 	result := make([]int64, 0, len(ids))
@@ -251,5 +251,5 @@ func (r *dynamicColumnRepository) GetAllSelectorIds(ctx context.Context, querySe
 			result = append(result, id.Int64)
 		}
 	}
-	return result
+	return result, nil
 }

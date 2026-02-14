@@ -2,13 +2,14 @@ package dynamiccolumn
 
 import (
 	"fmt"
-	domainDynamicColumn "gin-demo/internal/domain/dynamiccolumn"
 	"gin-demo/internal/shared/constants"
+	domainDynamicColumn "gin-demo/internal/system/dynamiccolumn"
+	"log/slog"
 
 	"gorm.io/gorm"
 )
 
-func seedCompanies(db *gorm.DB) {
+func seedCompanies(db *gorm.DB, logger *slog.Logger) {
 	// Implement invoice seeding logic here if needed
 	dycol := []domainDynamicColumn.DynamicColumn{
 		{

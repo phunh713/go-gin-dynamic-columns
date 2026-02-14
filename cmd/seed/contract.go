@@ -6,12 +6,13 @@ import (
 	"gin-demo/internal/application/config"
 	"gin-demo/internal/application/container"
 	"gin-demo/internal/domain/contract"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-func SeedContracts(db *gorm.DB) {
+func SeedContracts(db *gorm.DB, logger *slog.Logger) {
 	ctx := context.Background()
 	// add db to ctx so that it can be used in service/repository layers
 	container := container.NewContainer()

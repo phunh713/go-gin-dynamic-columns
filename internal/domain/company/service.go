@@ -3,8 +3,8 @@ package company
 import (
 	"context"
 	"errors"
-	"gin-demo/internal/domain/dynamiccolumn"
 	"gin-demo/internal/shared/constants"
+	"gin-demo/internal/system/dynamiccolumn"
 )
 
 type CompanyService interface {

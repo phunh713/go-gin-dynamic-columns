@@ -32,12 +32,10 @@ type dynamicColumnService struct {
 func NewDynamicColumnService(dynamicColumnRepo DynamicColumnRepository,
 	modelsMap types.ModelsMap,
 	modelRelationsMap types.ModelRelationsMap,
-	logger *slog.Logger,
 ) DynamicColumnService {
 	return &dynamicColumnService{dynamicColumnRepo: dynamicColumnRepo,
 		modelsMap:         modelsMap,
 		modelRelationsMap: modelRelationsMap,
-		logger:            logger,
 	}
 }
 
@@ -62,8 +60,6 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 	if len(dynamicCols) == 0 {
 		return nil
 	}
-	// Determine the order of refreshing dynamic columns based on their dependencies
-	orderedDynamicCols := r.determineRefreshOrder(ctx, table, ids, dynamicCols, originalRecordId)
 
 	// Create a temp table to store ids that need refreshing
 	err := r.dynamicColumnRepo.CreateTempIdsTable(ctx)
@@ -71,6 +67,21 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 		(*logPayload)["error"] = fmt.Sprintf("Error creating temp ids table: %v", err)
 		return err
 	}
+
+	// Determine the order of refreshing dynamic columns based on their dependencies
+	orderedDynamicCols, err := r.determineRefreshOrder(ctx, table, ids, dynamicCols, originalRecordId)
+	if err != nil {
+		return err
+	}
+
+	(*logPayload)["to_refresh"] = make(map[string]interface{})
+
+	for _, col := range orderedDynamicCols {
+		toRefresh := (*logPayload)["to_refresh"].(map[string]interface{})
+		toRefresh[fmt.Sprintf("%s.%s", col.TableName, col.Name)] = len(col.Ids)
+		(*logPayload)["to_refresh"] = toRefresh
+	}
+
 	for _, col := range orderedDynamicCols {
 		err := r.dynamicColumnRepo.CopyIdsToTempTable(ctx, col.Ids)
 		if err != nil {
@@ -79,10 +90,12 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 		}
 		err = r.dynamicColumnRepo.RefreshDynamicColumn(ctx, col)
 		if err != nil {
+			(*logPayload)["error"] = fmt.Sprintf("Error refreshing dynamic column %s.%s: %v", col.TableName, col.Name, err)
 			return err
 		}
 		err = r.dynamicColumnRepo.TruncateTempTable(ctx)
 		if err != nil {
+			(*logPayload)["error"] = fmt.Sprintf("Error truncating temp ids table: %v", err)
 			return err
 		}
 	}
@@ -92,8 +105,11 @@ func (r *dynamicColumnService) RefreshDynamicColumnsOfRecordIds(
 
 // CheckShouldRefreshDynamicColumn checks if the action requires refreshing dynamic columns
 func (r *dynamicColumnService) CheckShouldRefreshDynamicColumn(
-	ctx context.Context, table constants.TableName, action constants.Action,
-	payload interface{}) (bool, map[constants.TableName]Dependency) {
+	ctx context.Context,
+	table constants.TableName,
+	action constants.Action,
+	payload interface{},
+) (bool, map[constants.TableName]Dependency) {
 	changes := make(map[constants.TableName]Dependency)
 
 	var columns []string
@@ -146,7 +162,11 @@ func (r *dynamicColumnService) getAllDynamicColumnsFromChanges(ctx context.Conte
 
 /*
 * determineRefreshOrder determines the sequence of refreshing dynamic columns based on their dependencies.
-* table is the original table where the changes happened
+* Params:
+* - table: the original table where the changes happened
+* - ids: the list of changed record IDs in the original table
+* - dynamicCols: the list of dynamic columns that need to be refreshed due to the changes of the original table record
+* - originalRecordId: the ID of the original changed record (if any)
  */
 func (r *dynamicColumnService) determineRefreshOrder(
 	ctx context.Context,
@@ -154,7 +174,7 @@ func (r *dynamicColumnService) determineRefreshOrder(
 	ids []int64,
 	dynamicCols []DynamicColumn,
 	originalRecordId *int64,
-) []DynamicColumnWithMetadata {
+) ([]DynamicColumnWithMetadata, error) {
 	result := make([]DynamicColumnWithMetadata, 0)
 	processed := make(map[string]bool)
 	refreshColNames := r.buildRefreshColumnNames(dynamicCols)
@@ -175,7 +195,10 @@ func (r *dynamicColumnService) determineRefreshOrder(
 		// This column can be processed immediately because it doesn't wait for other dynamic columns.
 		// Example: A column that only depends on static fields (company.name, invoice.created_at)
 		if intersect := utils.StringSlicesIntersect(refreshColNames, deps); len(intersect) == 0 {
-			ids := r.resolveIdsFromOriginalTable(ctx, table, ids, col.Dependencies[table].RecordIdsSelector, originalRecordId)
+			ids, err := r.resolveIdsFromOriginalTable(ctx, ids, col.Dependencies[table].RecordIdsSelector, originalRecordId)
+			if err != nil {
+				return nil, err
+			}
 			result = append(result, DynamicColumnWithMetadata{
 				DynamicColumn: col,
 				Ids:           ids,
@@ -203,7 +226,7 @@ func (r *dynamicColumnService) determineRefreshOrder(
 		// Push it to the end of the queue and try again later in the next iteration
 		dynamicCols = append(dynamicCols, col)
 	}
-	return result
+	return result, nil
 }
 
 // getProcessedDependencies returns which dependencies have been processed
@@ -239,7 +262,15 @@ func (r *dynamicColumnService) extractDependencyColumnNames(dependencies map[con
 
 // resolveIdsFromOriginalTable resolves IDs based on the original table and record selector
 // This is used for the first level of dynamic columns that directly depend on the original changed record
-func (r *dynamicColumnService) resolveIdsFromOriginalTable(ctx context.Context, table constants.TableName, ids []int64, selector string, originalRecordId *int64) []int64 {
+// For example:
+// 1. if invoice.status changes, we use the id of the changed invoice.
+// 2. if invoice.status changes, due to this change, we also need to refresh companies.status. To get the list of company IDs to refresh, we use the record selector defined in the dependency which queries based on the changed invoice ID.
+// Params:
+// - table: the original changed table (e.g. invoice)
+// - ids: the list of changed record IDs (e.g. invoice IDs that changed)
+// - selector: the record selector defined in the dynamic column dependency
+// - originalRecordId: the ID of the original changed record (if any)
+func (r *dynamicColumnService) resolveIdsFromOriginalTable(ctx context.Context, ids []int64, selector string, originalRecordId *int64) ([]int64, error) {
 	// Build the list of IDs to process
 	result := make([]int64, 0)
 	if len(ids) > 0 {
@@ -251,30 +282,24 @@ func (r *dynamicColumnService) resolveIdsFromOriginalTable(ctx context.Context, 
 
 	// If no selector, return the IDs directly
 	if selector == "" {
-		return result
+		return result, nil
 	}
 
-	// Build context object with comma-separated IDs
-	idsStr := make([]string, len(result))
-	for i, v := range result {
-		idsStr[i] = fmt.Sprintf("%d", v)
+	r.dynamicColumnRepo.CopyIdsToTempTable(ctx, result)
+	foundIds, err := r.dynamicColumnRepo.GetAllSelectorIds(ctx, selector, nil)
+	r.dynamicColumnRepo.TruncateTempTable(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctxObj := map[string]interface{}{
-		string(table): map[string]string{
-			"ids": strings.Join(idsStr, ","),
-		},
-	}
-
-	foundIds := r.dynamicColumnRepo.GetAllSelectorIds(ctx, selector, ctxObj)
 	if len(foundIds) > 0 {
-		return foundIds
+		return foundIds, nil
 	}
-	return []int64{}
+	return []int64{}, nil
 }
 
 // resolveIdsFromMatchingDependencies resolves IDs from matching dependencies already in result
 func (r *dynamicColumnService) resolveIdsFromMatchingDependencies(ctx context.Context, col DynamicColumn, result []DynamicColumnWithMetadata, matchNames []string) []int64 {
+	payload := *r.GetLogPayload(ctx)
 	ids := make([]int64, 0)
 
 	for _, matchName := range matchNames {
@@ -283,22 +308,17 @@ func (r *dynamicColumnService) resolveIdsFromMatchingDependencies(ctx context.Co
 				continue
 			}
 
-			idsStr := make([]string, len(depCol.Ids))
-			for i, v := range depCol.Ids {
-				idsStr[i] = fmt.Sprintf("%d", v)
-			}
-
-			ctxObj := map[string]interface{}{
-				string(depCol.TableName): map[string]string{
-					"ids": strings.Join(idsStr, ","),
-				},
-			}
-
 			query := col.Dependencies[constants.TableName(depCol.TableName)].RecordIdsSelector
+
 			if query == "" {
 				ids = utils.AppendUnique(ids, depCol.Ids...)
 			} else {
-				foundIds := r.dynamicColumnRepo.GetAllSelectorIds(ctx, query, ctxObj)
+				r.dynamicColumnRepo.CopyIdsToTempTable(ctx, depCol.Ids)
+				foundIds, err := r.dynamicColumnRepo.GetAllSelectorIds(ctx, query, nil)
+				r.dynamicColumnRepo.TruncateTempTable(ctx)
+				if err != nil {
+					payload["error"] = fmt.Sprintf("Error getting selector ids for %s.%s: %v", depCol.TableName, depCol.Name, err)
+				}
 				if len(foundIds) > 0 {
 					ids = utils.AppendUnique(ids, foundIds...)
 				}
@@ -637,7 +657,7 @@ func (r *dynamicColumnService) buildDependencySelector(depTable constants.TableN
 		return "", err
 	}
 	joinStms := r.createJoinStmFromCteLinks(cteLinks, depTable)
-	joinStr := fmt.Sprintf("SELECT %s.id FROM %s %s WHERE %s.id IN ({%s.ids}) GROUP BY %s.id", rootTable, depTable, strings.Join(joinStms, " "), depTable, depTable, rootTable)
+	joinStr := fmt.Sprintf("SELECT DISTINCT %s.id FROM %s tdi JOIN %s ON %s.id = tdi.id %s", rootTable, constants.TEMP_TABLE_NAME, depTable, depTable, strings.Join(joinStms, " "))
 	joinStr = strings.ReplaceAll(joinStr, "LEFT JOIN", "JOIN") // Use INNER JOIN for selector to ensure only matching records are returned
 	return joinStr, nil
 }

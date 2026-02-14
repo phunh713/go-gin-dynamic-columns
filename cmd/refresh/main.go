@@ -32,7 +32,7 @@ func main() {
 	ctx = context.WithValue(ctx, config.ContextKeyDB, db)
 	c := container.NewContainer()
 
-	c.DynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, table, ids, constants.ActionRefresh, nil, nil, nil)
+	c.DynamicColumnService.RefreshDynamicColumnsOfRecordIds(ctx, constants.TableName(table), ids, constants.ActionRefresh, nil, nil)
 }
 
 func crontab() {

@@ -2,8 +2,8 @@ package payment
 
 import (
 	"context"
-	"gin-demo/internal/domain/dynamiccolumn"
 	"gin-demo/internal/shared/constants"
+	"gin-demo/internal/system/dynamiccolumn"
 )
 
 type PaymentService interface {

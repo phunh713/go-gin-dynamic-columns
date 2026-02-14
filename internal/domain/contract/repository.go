@@ -36,7 +36,7 @@ func (r *contractRepository) GetById(ctx context.Context, id int64) (*Contract, 
 func (r *contractRepository) GetAll(ctx context.Context) []Contract {
 	tx := r.GetDbTx(ctx)
 	var entities []Contract
-	tx.Find(&entities).Where("company_id = ?", 1)
+	tx.Limit(100).Where("company_id = ?", 1).Find(&entities)
 	return entities
 }
 

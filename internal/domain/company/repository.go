@@ -2,8 +2,8 @@ package company
 
 import (
 	"context"
-	"gin-demo/internal/domain/dynamiccolumn"
 	"gin-demo/internal/shared/base"
+	"gin-demo/internal/system/dynamiccolumn"
 )
 
 type CompanyRepository interface {

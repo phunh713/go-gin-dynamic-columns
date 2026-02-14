@@ -6,10 +6,10 @@ import (
 
 type App struct {
 	*gin.Engine
-	port string
+	Port string
 }
 
-func NewApp(config *ConfigEnv, middlewares ...gin.HandlerFunc) *App {
+func NewServer(config *ConfigEnv, middlewares ...gin.HandlerFunc) *App {
 	app := gin.Default()
 	for _, m := range middlewares {
 		app.Use(m)
@@ -17,6 +17,6 @@ func NewApp(config *ConfigEnv, middlewares ...gin.HandlerFunc) *App {
 
 	return &App{
 		Engine: app,
-		port:   config.AppPort,
+		Port:   config.AppPort,
 	}
 }
