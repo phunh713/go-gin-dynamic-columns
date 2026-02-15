@@ -2,7 +2,6 @@ package approval
 
 import (
 	"context"
-	"errors"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/system/dynamiccolumn"
 )
@@ -86,9 +85,6 @@ func (s *approvalService) Delete(ctx context.Context, id int64) error {
 	originalEntity, err := s.approvalRepo.GetById(ctx, id)
 	if err != nil {
 		return err
-	}
-	if originalEntity == nil {
-		return errors.New("approval not found")
 	}
 
 	err = s.approvalRepo.Delete(ctx, id)

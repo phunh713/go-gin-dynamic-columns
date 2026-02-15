@@ -201,9 +201,6 @@ func (s *${DOMAIN_NAME_LOWER}Service) Delete(ctx context.Context, id int64) erro
 	if err != nil {
 		return err
 	}
-	if originalEntity == nil {
-		return errors.New("${DOMAIN_NAME_LOWER} not found")
-	}
 	
 	err = s.${DOMAIN_NAME_LOWER}Repo.Delete(ctx, id)
 	if err != nil {

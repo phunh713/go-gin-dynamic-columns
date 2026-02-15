@@ -2,7 +2,6 @@ package contract
 
 import (
 	"context"
-	"errors"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/system/dynamiccolumn"
 )
@@ -87,9 +86,6 @@ func (s *contractService) Delete(ctx context.Context, id int64) error {
 	originalEntity, err := s.contractRepo.GetById(ctx, id)
 	if err != nil {
 		return err
-	}
-	if originalEntity == nil {
-		return errors.New("contract not found")
 	}
 
 	err = s.contractRepo.Delete(ctx, id)

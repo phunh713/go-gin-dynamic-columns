@@ -2,7 +2,6 @@ package deployment
 
 import (
 	"context"
-	"errors"
 	"gin-demo/internal/shared/constants"
 	"gin-demo/internal/system/dynamiccolumn"
 )
@@ -86,9 +85,6 @@ func (s *deploymentService) Delete(ctx context.Context, id int64) error {
 	originalEntity, err := s.deploymentRepo.GetById(ctx, id)
 	if err != nil {
 		return err
-	}
-	if originalEntity == nil {
-		return errors.New("deployment not found")
 	}
 
 	err = s.deploymentRepo.Delete(ctx, id)
